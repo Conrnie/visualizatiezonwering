@@ -1,0 +1,20 @@
+{
+  "name": "zonnescherm-visualizer",
+  "version": "1.0.0",
+  "description": "Interactive zonnescherm (awning) visualization and configuration tool",
+  "main": "index.html",
+  "scripts": {
+    "start": "python -m http.server 8000",
+    "dev": "python -m http.server 8000"
+  },
+  "keywords": [
+    "visualization",
+    "awning",
+    "zonnescherm",
+    "configurator",
+    "web-app",
+    "portfolio"
+  ],
+  "author": "",
+  "license": "MIT"
+}

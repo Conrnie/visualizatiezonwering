@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zonnescherm Herplaatsing Visualisatie</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="config.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Zonnescherm Herplaatsing Visualisatie</h1>
+            <p>Visualiseer hoe uw nieuwe zonnescherm eruit zal zien aan uw woning</p>
+        </header>
+        
+        <main class="main-content">
+            <!-- Configuratie sectie -->
+            <div class="config-section">
+                    <h2>Configureer uw zonnescherm</h2>
+                    
+                    <!-- Product Type Selectie -->
+                    <div class="form-group">
+                        <label for="product-type">Kies uw producttype:</label>
+                        <select id="product-type" name="product-type">
+                            <option value="">Selecteer een producttype</option>
+                            <option value="knikarm">Knikarm</option>
+                            <option value="uitvalarm">Uitvalarm</option>
+                            <option value="markiezen">Markiezen</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Model Selectie (alleen voor Knikarm en Uitval) -->
+                    <div class="form-group" id="model-selection" style="display: none;">
+                        <label>Kies uw model:</label>
+                        <div class="model-options" id="model-options">
+                            <!-- Modellen worden hier dynamisch toegevoegd -->
+                        </div>
+                    </div>
+                    
+                    <!-- Kleur Selectie -->
+                    <div class="form-group" id="color-selection">
+                        <label>Kies uw kleur:</label>
+                        <div class="color-options" id="color-options">
+                            <!-- Kleuren worden hier dynamisch toegevoegd -->
+                        </div>
+                    </div>
+                    
+                    <!-- Afbeelding Upload en Lijn Tekenen -->
+                    <div class="form-group" id="image-upload" style="display: none;">
+                        <label for="house-image">Upload een foto van uw woning en teken de plaatsingslijn:</label>
+                        <div class="upload-area">
+                            <input type="file" id="house-image" name="house-image" accept="image/*">
+                            <div class="upload-placeholder">
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                                    <polyline points="21,15 16,10 5,21"/>
+                                </svg>
+                                <p>Klik hier om een afbeelding te uploaden of sleep een bestand hierheen</p>
+                                <p class="file-info">Ondersteunde formaten: JPG, PNG, GIF (max 10MB)</p>
+                            </div>
+                            <div class="image-preview" id="image-preview" style="display: none;">
+                                 <img id="preview-image" src="" alt="Voorvertoning">
+                                  <button type="button" id="remove-image">Verwijderen</button>
+                              </div>
+                        </div>
+                        <p class="drawing-instructions">Klik en sleep op de afbeelding om een lijn te tekenen waar het zonnescherm geplaatst moet worden.</p>
+                    </div>
+                    
+                    <!-- Plaatsing Instructies -->
+                    <div class="form-group" id="placement-area" style="display: none;">
+                        <div class="placement-container">
+                            <div class="image-preview-container">
+                                <div style="position: relative;">
+                                    <img id="placement-image-preview" src="" alt="Woning voorvertoning" style="display: block; max-width: 100%;">
+                                    <canvas id="drawing-canvas" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></canvas>
+                                </div>
+                                <button type="button" id="clear-line">Lijn wissen</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+
+
+                    <!-- Prijsindicatie sectie -->
+                    <div class="price-indication-section">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="price-indication" name="price-indication">
+                            <label for="price-indication">Prijsindicatie aanvragen</label>
+                        </div>
+                        
+                        <div class="price-indication-fields" id="price-indication-fields" style="display: none;">
+                            <div class="form-group">
+                                <label for="width">Breedte (cm):</label>
+                                <input type="number" id="width" name="width" min="100" max="500" placeholder="Bijv. 300">
+                            </div>
+                            <div class="form-group">
+                                <label for="projection">Uitval (cm):</label>
+                                <input type="number" id="projection" name="projection" min="50" max="300" placeholder="Bijv. 200">
+                            </div>
+                            <div class="form-group">
+                                <label for="verdieping">Verdieping:</label>
+                                <select id="verdieping" name="verdieping">
+                                    <option value="">Selecteer verdieping</option>
+                                    <option value="begane-grond">Begane grond</option>
+                                    <option value="eerste-verdieping">Eerste verdieping</option>
+                                    <option value="tweede-verdieping">Tweede verdieping</option>
+                                    <option value="derde-verdieping">Derde verdieping</option>
+                                    <option value="hoger">Hoger dan 3e verdieping</option>
+                                </select>
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="email">E-mailadres:</label>
+                                <input type="email" id="email" name="email" placeholder="uw.email@voorbeeld.nl">
+                            </div>
+                            <div class="form-group full-width">
+                                <label for="phone">Telefoonnummer (optioneel):</label>
+                                <input type="tel" id="phone" name="phone" placeholder="06-12345678">
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Genereer Knop -->
+                    <div class="form-group">
+                        <button type="button" id="generate-visualization" class="generate-btn" disabled>
+                            Genereer Visualisatie
+                        </button>
+                    </div>
+                    
+                    <!-- Visualisatie sectie -->
+                    <div class="result-section">
+                    <div class="visualization-area">
+                        <div class="placeholder-content">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+                                <circle cx="12" cy="13" r="3"/>
+                            </svg>
+                            <p>Configureer uw zonnescherm en upload een foto om de visualisatie te genereren</p>
+                        </div>
+                        <div class="result-image" style="display: none;">
+                            <img id="result-visualization" src="" alt="Zonnescherm visualisatie">
+                            <div class="result-actions">
+                                <button type="button" id="download-result">Download Afbeelding</button>
+                                <button type="button" id="new-visualization">Nieuwe Visualisatie</button>
+                            </div>
+                        </div>
+                        <div class="loading-state" style="display: none;">
+                            <div class="spinner"></div>
+                            <p>Bezig met genereren van uw visualisatie...</p>
+                        </div>
+                    </div>
+                </div>
+        </main>
+    </div>
+
+    <!-- Image Modal removed - results are only delivered via email -->
+    
+    <script src="script.js"></script>
+</body>
+</html>

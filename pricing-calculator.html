@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interne Pricing Calculator - Zonnescherm Visualisatie</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        .calculator-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 30px;
+            border: 1px solid #e9ecef;
+        }
+
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 20px;
+            font-size: 1.4em;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .input-group input, .input-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input:focus, .input-group select:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        .cost-breakdown {
+            background: #fff;
+            border-radius: 10px;
+            padding: 25px;
+            border-left: 5px solid #e74c3c;
+            margin-bottom: 20px;
+        }
+
+        .cost-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .cost-item:last-child {
+            border-bottom: none;
+            font-weight: bold;
+            font-size: 1.1em;
+            color: #e74c3c;
+        }
+
+        .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .pricing-table th {
+            background: #3498db;
+            color: white;
+            padding: 15px;
+            text-align: left;
+        }
+
+        .pricing-table td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .pricing-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .profit-margin {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+        }
+
+        .profit-margin.negative {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+
+        .btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background 0.3s;
+        }
+
+        .btn:hover {
+            background: #2980b9;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #856404;
+        }
+
+        @media (max-width: 768px) {
+            .calculator-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏠 Interne Pricing Calculator</h1>
+            <p>Bereken je klantprijzen op basis van werkelijke Gemini API kosten</p>
+        </div>
+
+        <div class="content">
+            <div class="warning">
+                <strong>⚠️ Confidentieel:</strong> Deze calculator is alleen voor intern gebruik. Kosten zijn gebaseerd op actuele Gemini 2.5 Flash pricing.
+            </div>
+
+            <div class="calculator-grid">
+                <div class="card">
+                    <h3>📊 Service Parameters</h3>
+                    
+                    <div class="input-group">
+                        <label for="serviceType">Service Type:</label>
+                        <select id="serviceType" onchange="calculateCosts()">
+                            <option value="placement_only">Alleen Visualisatie (5 variaties)</option>
+                            <option value="placement_and_color">Visualisatie + Kleur (10 variaties)</option>
+                            <option value="single_optimized">Geoptimaliseerd (1-2 variaties)</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="monthlyVolume">Afbeeldingen per Klant per Maand:</label>
+                        <input type="number" id="monthlyVolume" value="50" min="1" onchange="calculateCosts()">
+                    </div>
+
+                    <div class="input-group">
+                        <label for="numberOfClients">Aantal Zonwering Bedrijven:</label>
+                        <input type="number" id="numberOfClients" value="5" min="1" onchange="calculateCosts()">
+                    </div>
+
+                    <div class="input-group">
+                        <label for="profitMargin">Gewenste Winstmarge (%):</label>
+                        <input type="number" id="profitMargin" value="300" min="0" onchange="calculateCosts()">
+                    </div>
+
+                    <div class="input-group">
+                        <label for="fixedCosts">Vaste Kosten per Maand (€):</label>
+                        <input type="number" id="fixedCosts" value="100" min="0" onchange="calculateCosts()">
+                    </div>
+
+                    <button class="btn" onclick="calculateCosts()">Herbereken</button>
+                </div>
+
+                <div class="card">
+                    <h3>💰 Kosten Breakdown</h3>
+                    <div id="costBreakdown" class="cost-breakdown">
+                        <!-- Wordt gevuld door JavaScript -->
+                    </div>
+
+                    <div id="profitAnalysis" class="profit-margin">
+                        <!-- Wordt gevuld door JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <table class="pricing-table">
+                <thead>
+                    <tr>
+                        <th>Abonnement Type</th>
+                        <th>API Kosten/Klant/Maand</th>
+                        <th>Aanbevolen Abonnement Prijs</th>
+                        <th>Winstmarge</th>
+                        <th>Totale Maandelijkse Omzet</th>
+                    </tr>
+                </thead>
+                <tbody id="pricingTableBody">
+                    <!-- Wordt gevuld door JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Actuele Gemini pricing (gebaseerd op onderzoek)
+        const PRICING = {
+            imageGeneration: 0.039, // $0.039 per afbeelding
+            textEvaluation: 0.002,  // ~$0.002 per evaluatie
+            eurToUsd: 0.92         // Approximate conversion
+        };
+
+        const SERVICE_CONFIGS = {
+            placement_only: {
+                name: "Alleen Visualisatie",
+                imageGenerations: 5,
+                textEvaluations: 5,
+                description: "5 placement variaties zonder kleur"
+            },
+            placement_and_color: {
+                name: "Visualisatie + Kleur",
+                imageGenerations: 10,
+                textEvaluations: 10,
+                description: "5 placement + 5 kleur iteraties"
+            },
+            single_optimized: {
+                name: "Geoptimaliseerd",
+                imageGenerations: 2,
+                textEvaluations: 2,
+                description: "1-2 hoogkwaliteit variaties"
+            }
+        };
+
+        function calculateServiceCost(config) {
+            const imageCost = config.imageGenerations * PRICING.imageGeneration;
+            const textCost = config.textEvaluations * PRICING.textEvaluation;
+            const totalUSD = imageCost + textCost;
+            const totalEUR = totalUSD / PRICING.eurToUsd;
+            
+            return {
+                imageCost,
+                textCost,
+                totalUSD,
+                totalEUR
+            };
+        }
+
+        function calculateCosts() {
+            const serviceType = document.getElementById('serviceType').value;
+            const monthlyVolume = parseInt(document.getElementById('monthlyVolume').value);
+            const numberOfClients = parseInt(document.getElementById('numberOfClients').value);
+            const profitMargin = parseFloat(document.getElementById('profitMargin').value);
+            const fixedCosts = parseFloat(document.getElementById('fixedCosts').value);
+
+            const config = SERVICE_CONFIGS[serviceType];
+            const costs = calculateServiceCost(config);
+            
+            // Bereken totale maandelijkse kosten voor alle klanten
+            const totalMonthlyImages = monthlyVolume * numberOfClients;
+            const monthlyApiCosts = costs.totalEUR * totalMonthlyImages;
+            const totalMonthlyCosts = monthlyApiCosts + fixedCosts;
+            
+            // Bereken kosten per klant per maand
+            const costPerClientPerMonth = (costs.totalEUR * monthlyVolume) + (fixedCosts / numberOfClients);
+            
+            // Bereken aanbevolen abonnement prijs per klant
+            const recommendedMonthlyPrice = costPerClientPerMonth * (1 + profitMargin / 100);
+            const totalMonthlyRevenue = recommendedMonthlyPrice * numberOfClients;
+            const monthlyProfit = totalMonthlyRevenue - totalMonthlyCosts;
+
+            // Update cost breakdown
+            updateCostBreakdown(costs, monthlyApiCosts, fixedCosts, costPerClientPerMonth, monthlyVolume, numberOfClients);
+            
+            // Update profit analysis
+            updateProfitAnalysis(recommendedMonthlyPrice, totalMonthlyRevenue, monthlyProfit, profitMargin, numberOfClients);
+            
+            // Update pricing table
+            updatePricingTable(monthlyVolume, numberOfClients, profitMargin, fixedCosts);
+        }
+
+        function updateCostBreakdown(costs, monthlyApiCosts, fixedCosts, costPerClientPerMonth, monthlyVolume, numberOfClients) {
+            const breakdown = document.getElementById('costBreakdown');
+            const costPerImage = costs.totalEUR;
+            const costPerClientApiOnly = costPerImage * monthlyVolume;
+            
+            breakdown.innerHTML = `
+                <div class="cost-item">
+                    <span>API Kosten per afbeelding:</span>
+                    <span>€${costPerImage.toFixed(4)}</span>
+                </div>
+                <div class="cost-item">
+                    <span>API Kosten per klant/maand (${monthlyVolume} afbeeldingen):</span>
+                    <span>€${costPerClientApiOnly.toFixed(2)}</span>
+                </div>
+                <div class="cost-item">
+                    <span>Totale API kosten/maand (${numberOfClients} klanten):</span>
+                    <span>€${monthlyApiCosts.toFixed(2)}</span>
+                </div>
+                <div class="cost-item">
+                    <span>Vaste kosten per maand:</span>
+                    <span>€${fixedCosts.toFixed(2)}</span>
+                </div>
+                <div class="cost-item">
+                    <span>Totale kosten per klant/maand:</span>
+                    <span>€${costPerClientPerMonth.toFixed(2)}</span>
+                </div>
+            `;
+        }
+
+        function updateProfitAnalysis(recommendedMonthlyPrice, totalMonthlyRevenue, monthlyProfit, profitMargin, numberOfClients) {
+            const analysis = document.getElementById('profitAnalysis');
+            const isNegative = monthlyProfit < 0;
+            
+            analysis.className = `profit-margin ${isNegative ? 'negative' : ''}`;
+            analysis.innerHTML = `
+                <h4>${isNegative ? '⚠️ Verlies Waarschuwing' : '✅ Abonnement Analyse'}</h4>
+                <p><strong>Aanbevolen abonnement per klant/maand:</strong> €${recommendedMonthlyPrice.toFixed(2)}</p>
+                <p><strong>Totale maandelijkse omzet (${numberOfClients} klanten):</strong> €${totalMonthlyRevenue.toFixed(2)}</p>
+                <p><strong>Maandelijkse winst:</strong> €${monthlyProfit.toFixed(2)}</p>
+                <p><strong>Winstmarge:</strong> ${profitMargin}%</p>
+                <p><strong>Jaarlijkse omzet:</strong> €${(totalMonthlyRevenue * 12).toFixed(2)}</p>
+                ${isNegative ? '<p><em>⚠️ Met deze parameters maak je verlies. Verhoog de prijs of verlaag de kosten.</em></p>' : ''}
+            `;
+        }
+
+        function updatePricingTable(monthlyVolume, numberOfClients, profitMargin, fixedCosts) {
+            const tbody = document.getElementById('pricingTableBody');
+            tbody.innerHTML = '';
+
+            Object.entries(SERVICE_CONFIGS).forEach(([key, config]) => {
+                const costs = calculateServiceCost(config);
+                const costPerClientApiOnly = costs.totalEUR * monthlyVolume;
+                const costPerClientPerMonth = costPerClientApiOnly + (fixedCosts / numberOfClients);
+                const recommendedMonthlyPrice = costPerClientPerMonth * (1 + profitMargin / 100);
+                const totalMonthlyRevenue = recommendedMonthlyPrice * numberOfClients;
+                const actualMargin = ((recommendedMonthlyPrice - costPerClientApiOnly) / costPerClientApiOnly * 100);
+
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td><strong>${config.name} Abonnement</strong><br><small>${monthlyVolume} afbeeldingen/maand</small></td>
+                    <td>€${costPerClientApiOnly.toFixed(2)}</td>
+                    <td><strong>€${recommendedMonthlyPrice.toFixed(2)}/maand</strong></td>
+                    <td>${actualMargin.toFixed(0)}%</td>
+                    <td>€${totalMonthlyRevenue.toFixed(2)}</td>
+                `;
+            });
+        }
+
+        // Initial calculation
+        calculateCosts();
+    </script>
+</body>
+</html>

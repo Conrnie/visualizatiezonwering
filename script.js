@@ -6,12 +6,6 @@ const productData = {
             { value: 'knikarm-model1', name: 'Knikarm Model 1', image: 'assets/models/model1.webp' }
         ]
     },
-    uitvalarm: {
-        name: 'Uitvalarm',
-        models: [
-            { value: 'uitvalarm-model1', name: 'Uitvalarm Model 1', image: 'assets/models/model2.webp' }
-        ]
-    },
     markiezen: {
         name: 'Markiezen',
         models: [

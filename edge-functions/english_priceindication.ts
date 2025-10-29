@@ -94,90 +94,90 @@ class GmailAPIService {
     return result;
   }
   async sendStartNotification(customerEmail, customerName) {
-    const subject = 'Uw Zonnescherm Visualisatie wordt Gemaakt';
+    const subject = 'Your Awning Visualization Is Being Prepared';
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
         <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hallo ${customerName || 'daar'}!</h2>
+          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hello ${customerName || 'there'}!</h2>
           
-          <p style="color: #555; line-height: 1.6;">Bedankt voor uw aanvraag! We zijn nu bezig met het maken van uw persoonlijke zonnescherm visualisatie en prijsindicatie.</p>
+          <p style="color: #555; line-height: 1.6;">Thanks for your request! We're now creating your personalized awning visualization and price estimate.</p>
           
           <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-            <h3 style="color: #2c3e50; margin-top: 0;">⏳ Wat gebeurt er nu?</h3>
+            <h3 style="color: #2c3e50; margin-top: 0;">⏳ What happens next?</h3>
             <ul style="color: #555; line-height: 1.8;">
-              <li>Onze AI analyseert uw woningfoto</li>
-              <li>We plaatsen het zonnescherm op de beste locatie</li>
-              <li>We berekenen uw persoonlijke prijsindicatie</li>
-              <li>U ontvangt binnen enkele minuten het resultaat</li>
+              <li>Our AI analyzes your photo</li>
+              <li>We place the awning in the best position</li>
+              <li>We calculate your personalized price estimate</li>
+              <li>You’ll receive the results within a few minutes</li>
             </ul>
           </div>
           
           <div style="text-align: center; margin: 20px 0;">
             <div style="background: #28a745; color: white; padding: 15px; border-radius: 8px; display: inline-block;">
-              <strong>🔄 Bezig met verwerken...</strong>
+              <strong>🔄 Processing...</strong>
             </div>
           </div>
           
-          <p style="color: #666; font-size: 14px; text-align: center;">Dit proces duurt meestal 2-5 minuten.</p>
+          <p style="color: #666; font-size: 14px; text-align: center;">This process usually takes 2–5 minutes.</p>
         </div>
       </div>
     `;
     return await this.sendEmail(customerEmail, subject, htmlContent);
   }
   async sendCompletionNotification(customerEmail, customerName, awningType, processedImage, goalAchieved, score, priceData = null) {
-    const subject = goalAchieved ? 'Uw Zonnescherm Visualisatie is Klaar!' : 'Uw Zonnescherm Visualisatie - Resultaat Beschikbaar';
+    const subject = goalAchieved ? 'Your Awning Visualization Is Ready!' : 'Your Awning Visualization – Result Available';
     const priceSection = priceData ? `
       <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
-        <h3 style="color: #2c3e50; margin-top: 0;">💰 Prijsindicatie</h3>
+        <h3 style="color: #2c3e50; margin-top: 0;">💰 Price Estimate</h3>
         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Basisprijs zonnescherm:</span>
+          <span style="color: #555;">Base awning price:</span>
           <span style="font-weight: bold;">€${priceData.basePrice.toFixed(2)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Installatie (${priceData.floor}):</span>
+          <span style="color: #555;">Installation (${priceData.floor}):</span>
           <span style="font-weight: bold;">€${priceData.installationCost.toFixed(2)}</span>
         </div>
         ${priceData.colorSurcharge > 0 ? `
         <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Kleur toeslag:</span>
+          <span style="color: #555;">Color surcharge:</span>
           <span style="font-weight: bold;">€${priceData.colorSurcharge.toFixed(2)}</span>
         </div>
         ` : ''}
         <hr style="border: none; border-top: 1px solid #ccc; margin: 15px 0;">
         <div style="display: flex; justify-content: space-between; font-size: 18px;">
-          <span style="color: #2c3e50; font-weight: bold;">Totaalprijs (incl. BTW):</span>
+          <span style="color: #2c3e50; font-weight: bold;">Total price (incl. VAT):</span>
           <span style="color: #e74c3c; font-weight: bold; font-size: 20px;">€${priceData.totalPrice.toFixed(2)}</span>
         </div>
       </div>
       
       <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
         <p style="color: #856404; margin: 0; font-size: 14px;">
-          <strong>⚠️ Let op:</strong> Dit is een indicatieve prijs. De definitieve prijs kan afwijken na een persoonlijke meting en adviesgesprek.
+          <strong>⚠️ Note:</strong> This is an indicative price. The final price may differ after an in‑home measurement and consultation.
         </p>
       </div>
     ` : '';
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
         <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hallo ${customerName || 'daar'}!</h2>
+          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hello ${customerName || 'there'}!</h2>
           
-          <p style="color: #555; line-height: 1.6;">Uw zonnescherm visualisatie is voltooid! Hieronder vindt u het resultaat${priceData ? ' inclusief prijsindicatie' : ''}:</p>
+          <p style="color: #555; line-height: 1.6;">Your awning visualization is complete! Below you’ll find the result${priceData ? ' including a price estimate' : ''}:</p>
           
           <div style="text-align: center; margin: 20px 0;">
-            <h3 style="color: #2c3e50;">🏠 Uw Zonnescherm Visualisatie</h3>
-            <img src="cid:visualization" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" alt="Zonnescherm visualisatie">
-            <p style="color: #666; font-size: 12px; margin-top: 10px;">Zo zou uw nieuwe ${awningType} zonnescherm er uit kunnen zien</p>
+            <h3 style="color: #2c3e50;">🏠 Your Awning Visualization</h3>
+            <img src="cid:visualization" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" alt="Awning visualization">
+            <p style="color: #666; font-size: 12px; margin-top: 10px;">This is how your new ${awningType} awning could look</p>
           </div>
           
           ${priceData ? `
           <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-            <h3 style="color: #2c3e50; margin-top: 0;">📋 Specificaties</h3>
+            <h3 style="color: #2c3e50; margin-top: 0;">📋 Specifications</h3>
             <ul style="color: #555; line-height: 1.8;">
-              <li><strong>Type zonnescherm:</strong> ${priceData.awningType}</li>
-              <li><strong>Afmetingen:</strong> ${priceData.width}cm breed × ${priceData.projection}cm uitval</li>
-              <li><strong>Oppervlakte:</strong> ${priceData.area} m²</li>
-              <li><strong>Verdieping:</strong> ${priceData.floor}</li>
-              <li><strong>Kleur:</strong> ${priceData.fabricColor || 'Standaard'}</li>
+              <li><strong>Awning type:</strong> ${priceData.awningType}</li>
+              <li><strong>Dimensions:</strong> ${priceData.width}cm wide × ${priceData.projection}cm projection</li>
+              <li><strong>Area:</strong> ${priceData.area} m²</li>
+              <li><strong>Floor:</strong> ${priceData.floor}</li>
+              <li><strong>Color:</strong> ${priceData.fabricColor || 'Standard'}</li>
             </ul>
           </div>
           ` : ''}
@@ -185,14 +185,14 @@ class GmailAPIService {
           ${priceSection}
           
           <div style="text-align: center; margin-top: 30px;">
-            <p style="color: #555; margin-bottom: 15px;">Interesse in deze visualisatie${priceData ? ' en prijsindicatie' : ''}?</p>
-            <a href="tel:+31123456789" style="background: #3498db; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">📞 Bel ons</a>
-            <a href="mailto:info@voorbeeld.nl" style="background: #28a745; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">✉️ E-mail ons</a>
+            <p style="color: #555; margin-bottom: 15px;">Interested in this visualization${priceData ? ' and price estimate' : ''}?</p>
+            <a href="tel:+31123456789" style="background: #3498db; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">📞 Call us</a>
+            <a href="mailto:info@example.com" style="background: #28a745; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">✉️ Email us</a>
           </div>
           
           <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 12px;">
-            <p>Deze visualisatie${priceData ? ' en prijsindicatie' : ''} is 30 dagen geldig vanaf ${new Date().toLocaleDateString('nl-NL')}.</p>
-            <p>Bedankt voor uw vertrouwen in onze dienstverlening!</p>
+            <p>This visualization${priceData ? ' and price estimate' : ''} is valid for 30 days from ${new Date().toLocaleDateString('en-GB')}.</p>
+            <p>Thank you for your trust in our service!</p>
           </div>
         </div>
       </div>
@@ -204,7 +204,7 @@ class GmailAPIService {
       const base64Match = processedImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
       const base64Data = base64Match ? base64Match[1] : processedImage;
       attachments.push({
-        filename: 'zonnescherm_visualisatie.jpg',
+        filename: 'awning_visualization.jpg',
         mimeType: 'image/jpeg',
         base64Data: base64Data,
         contentId: 'visualization'
@@ -271,21 +271,21 @@ class PriceCalculator {
   }
   getFloorDisplayName(floor) {
     const floorNames = {
-      'begane-grond': 'Begane grond',
-      'eerste-verdieping': 'Eerste verdieping',
-      'tweede-verdieping': 'Tweede verdieping',
-      'derde-verdieping': 'Derde verdieping',
-      'hoger': 'Hoger dan 3e verdieping'
+      'begane-grond': 'Ground floor',
+      'eerste-verdieping': 'First floor',
+      'tweede-verdieping': 'Second floor',
+      'derde-verdieping': 'Third floor',
+      'hoger': 'Above 3rd floor'
     };
     return floorNames[floor] || floor;
   }
   getAwningDisplayName(awningType) {
     const awningNames = {
-      'knikarm': 'Knikarm Zonnescherm',
-      'knikarmscherm': 'Knikarm Zonnescherm',
-      'uitvalarm': 'Uitvalarm Zonnescherm',
-      'uitvalscherm': 'Uitvalarm Zonnescherm',
-      'markiezen': 'Markiezen'
+      'knikarm': 'Retractable Awning',
+      'knikarmscherm': 'Retractable Awning',
+      'uitvalarm': 'Drop Arm Awning',
+      'uitvalscherm': 'Drop Arm Awning',
+      'markiezen': 'Dutch Canopy'
     };
     return awningNames[awningType] || awningType;
   }
@@ -349,7 +349,7 @@ Deno.serve(async (req)=>{
     console.log('- send_notifications:', send_notifications);
     console.log('- width:', width);
     console.log('- projection:', projection);
-    console.log('- verdieping:', verdieping);
+    console.log('- floor (verdieping):', verdieping);
     console.log('- include_price_indication:', include_price_indication);
     // Validate required parameters
     if (!image_data || !new_awning_type) {
@@ -536,28 +536,38 @@ Deno.serve(async (req)=>{
       // Define model-specific descriptions and hardware requirements
       let modelDescription = "";
       if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Use modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall. Include a slim rectangular cassette mounted to the wall. Arms/frame may be dark grey or black. This is a retractable folding arm awning - NOT a fixed canopy or markiezen.${colorDescription}`;
+        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Use modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall. Include a slim rectangular cassette mounted to the wall. Arms/frame may be dark grey or black. This is a retractable folding arm awning - NOT a fixed canopy or markiezen. IMPORTANT: Show the awning in FULLY EXTENDED position with arms completely unfolded and fabric fully deployed.${colorDescription}`;
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
-        modelDescription = `Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.${colorDescription}`;
+        modelDescription = `Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars. IMPORTANT: Show the awning in FULLY EXTENDED position with fabric completely dropped down and arms fully extended.${colorDescription}`;
       } else if (awningType === "markiezen") {
-        modelDescription = `Use a traditional fixed canopy: a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar.${colorDescription}`;
+        modelDescription = `Use a traditional fixed canopy: a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar. IMPORTANT: Show the canopy in its full extended form providing maximum shade coverage.${colorDescription}`;
       } else {
         modelDescription = colorDescription;
       }
       // Add negative prompting to exclude unwanted awning types
       let negativePrompting = "";
       if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall.";
+        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
-        negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade.";
+        negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
       } else if (awningType === "markiezen") {
-        negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
+        negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
       }
       // Add stripe-specific negative prompting if pattern is striped
       if (patternType && patternType !== "effen" && stripeRatio === "1:1") {
         negativePrompting += " STRIPE PATTERN RULES: NO duplicate colors side by side - each stripe must be a different color from its adjacent stripes. Create perfect alternating pattern with distinct colors.";
       }
-      return `Using the provided image, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. ${modelDescription} The awning should look professionally installed and architecturally appropriate. Variation strategy: ${variation}. ${negativePrompting}`;
+      return `CRITICAL AWNING POSITION REQUIREMENT: The awning MUST be shown in FULLY EXTENDED/OPEN position with fabric completely deployed. NEVER show retracted, closed, or partially extended awnings. DO NOT add random mechanical elements or fake extension mechanisms.
+
+Using the provided image, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. 
+
+${modelDescription} 
+
+MANDATORY EXTENDED POSITION: Show the awning fabric completely unrolled and providing maximum shade coverage. The fabric should be taut and fully deployed from the mounting point. DO NOT show any retracted or rolled-up fabric. DO NOT add artificial extension mechanisms that don't belong to the actual awning model.
+
+CRITICAL ANGLE REQUIREMENTS: The awning fabric MUST have a proper diagonal downward slope from the wall mounting point to the front edge. The fabric should be clearly visible and angled downward at approximately 10-15 degrees from horizontal to create realistic shade coverage. The fabric surface should be clearly visible from the viewing angle, not appearing flat or too horizontal. Ensure the awning projects outward with a natural downward slope that shows the fabric texture and creates proper shadow underneath.
+
+The awning should look professionally installed and architecturally appropriate. Variation strategy: ${variation}. ${negativePrompting}`;
     }
     // Function to build evaluation prompt
     function buildEvaluationPrompt(awningType) {
@@ -1002,31 +1012,31 @@ Deno.serve(async (req)=>{
           if (currentColorIteration === 1) {
             // First iteration: comprehensive color application
             if (finalPatternType === 'solid') {
-              colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.`;
+            colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.`;
+          } else {
+            if (finalStripeRatio === '1:1') {
+              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.`;
             } else {
-              if (finalStripeRatio === '1:1') {
-                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.`;
-              } else {
-                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. Create consistent pattern across entire fabric surface, maintaining stripe proportions.`;
-              }
+              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create consistent pattern across entire fabric surface, maintaining stripe proportions.`;
             }
+          }
           } else {
             // Second iteration: refinement and correction
             const refinementPrompts = finalPatternType === 'solid' ? hasColorSwatch ? [
-              `Pattern correction to match swatch: Ensure the pattern follows the reference swatch exactly, consistently across all fabric panels and seams.`,
-              `Final swatch pattern application: Perfect the pattern to exactly match the reference swatch for complete visual consistency.`
+              `Pattern correction to match swatch: Ensure the pattern follows the reference swatch exactly, consistently across all fabric panels and seams. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`,
+              `Final swatch pattern application: Perfect the pattern to exactly match the reference swatch for complete visual consistency. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`
             ] : [
-              `Color refinement: Perfect the ${new_fabric_color} application, ensuring uniform coverage and smooth fabric texture throughout.`,
-              `Final color correction: Achieve perfect ${new_fabric_color} uniformity across the entire awning fabric surface.`
+              `Color refinement: Perfect the ${new_fabric_color} application, ensuring uniform coverage and smooth fabric texture throughout. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`,
+              `Final color correction: Achieve perfect ${new_fabric_color} uniformity across the entire awning fabric surface. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`
             ] : hasColorSwatch ? [
-              `Stripe alignment to match swatch: Apply the pattern shown in the reference swatch with proper spacing, ensuring pattern continuity across fabric joints.`,
-              `Pattern optimization to match swatch: Ensure the pattern maintains the exact appearance of the reference swatch throughout the fabric.`
-            ] : finalStripeRatio === '1:1' ? [
-              `Pattern correction: Ensure ${new_fabric_color} stripes have EQUAL WIDTH - each stripe exactly the same width as adjacent stripes. NO DUPLICATE COLORS side by side. Perfect alternating pattern.`,
-              `Final stripe optimization: Perfect the ${new_fabric_color} equal-width stripe pattern. Verify each stripe is identical in width and no two adjacent stripes share the same color.`
-            ] : [
-              `Pattern correction: Ensure ${new_fabric_color} stripes follow ${finalStripeRatio} ratio consistently across all fabric panels and seams.`,
-              `Final stripe optimization: Perfect the ${new_fabric_color} stripe pattern for complete consistency and proper proportions.`
+                `Stripe alignment to match swatch: Apply the pattern shown in the reference swatch with proper spacing, ensuring pattern continuity across fabric joints. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`,
+                `Pattern optimization to match swatch: Ensure the pattern maintains the exact appearance of the reference swatch throughout the fabric. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`
+              ] : finalStripeRatio === '1:1' ? [
+                `Pattern correction: Ensure ${new_fabric_color} stripes have EQUAL WIDTH - each stripe exactly the same width as adjacent stripes. NO DUPLICATE COLORS side by side. Perfect alternating pattern. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`,
+                `Final stripe optimization: Perfect the ${new_fabric_color} equal-width stripe pattern. Verify each stripe is identical in width and no two adjacent stripes share the same color. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`
+              ] : [
+                `Pattern correction: Ensure ${new_fabric_color} stripes follow ${finalStripeRatio} ratio consistently across all fabric panels and seams. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`,
+                `Final stripe optimization: Perfect the ${new_fabric_color} stripe pattern for complete consistency and proper proportions. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms.`
             ];
             colorEditPrompt = refinementPrompts[(currentColorIteration - 2) % refinementPrompts.length];
           }

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gmail OAuth Helper - Generate Refresh Token</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+        }
+        .step {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            border-radius: 5px;
+        }
+        .step h3 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #3498db;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover {
+            background: #2980b9;
+        }
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .code-block {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin: 10px 0;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Gmail OAuth Helper</h1>
+        <p>This tool helps you generate a Gmail refresh token for your awning visualization app.</p>
+
+        <div class="step">
+            <h3>Step 1: Enter Your OAuth Credentials</h3>
+            <p>Enter your Google OAuth Client ID and Client Secret from the Google Cloud Console:</p>
+            <input type="text" id="clientId" placeholder="Your OAuth Client ID" />
+            <input type="text" id="clientSecret" placeholder="Your OAuth Client Secret" />
+            <button onclick="startOAuth()">Start OAuth Flow</button>
+        </div>
+
+        <div class="step hidden" id="step2">
+            <h3>Step 2: Authorize Access</h3>
+            <p>Click the button below to open Google's authorization page:</p>
+            <button id="authButton" onclick="openAuthWindow()">Authorize Gmail Access</button>
+        </div>
+
+        <div class="step hidden" id="step3">
+            <h3>Step 3: Get Authorization Code</h3>
+            <p>After authorizing, you'll be redirected to a page that can't be reached (this is normal). Look at the URL in your browser's address bar and copy the "code" parameter. It will look like:</p>
+            <p><code>http://localhost:3000/callback?code=YOUR_CODE_HERE&scope=...</code></p>
+            <p>Copy just the code part (after "code=") and paste it below:</p>
+            <input type="text" id="authCode" placeholder="Paste authorization code here" />
+            <button onclick="exchangeCodeForToken()">Get Refresh Token</button>
+        </div>
+
+        <div class="step hidden" id="step4">
+            <h3>Step 4: Your Refresh Token</h3>
+            <div class="success">
+                <strong>Success!</strong> Here are your environment variables:
+            </div>
+            <div class="code-block" id="envVars"></div>
+            <button onclick="copyToClipboard()">Copy to Clipboard</button>
+        </div>
+
+        <div id="errorDiv" class="error hidden"></div>
+        <div id="statusDiv"></div>
+    </div>
+
+    <script>
+        let clientId = '';
+        let clientSecret = '';
+        let authUrl = '';
+
+        function startOAuth() {
+            clientId = document.getElementById('clientId').value.trim();
+            clientSecret = document.getElementById('clientSecret').value.trim();
+
+            if (!clientId || !clientSecret) {
+                showError('Please enter both Client ID and Client Secret');
+                return;
+            }
+
+            // Generate OAuth URL - using the redirect URI that matches your OAuth client
+            const redirectUri = 'http://localhost:3000/callback';
+            const scope = 'https://www.googleapis.com/auth/gmail.send';
+            
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+                `client_id=${encodeURIComponent(clientId)}&` +
+                `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+                `scope=${encodeURIComponent(scope)}&` +
+                `response_type=code&` +
+                `access_type=offline&` +
+                `prompt=consent`;
+
+            document.getElementById('step2').classList.remove('hidden');
+            showStatus('OAuth URL generated. Click "Authorize Gmail Access" to continue.');
+        }
+
+        function openAuthWindow() {
+            window.open(authUrl, '_blank', 'width=600,height=600');
+            document.getElementById('step3').classList.remove('hidden');
+            showStatus('Authorization window opened. Complete the authorization and copy the code.');
+        }
+
+        async function exchangeCodeForToken() {
+            const authCode = document.getElementById('authCode').value.trim();
+            
+            if (!authCode) {
+                showError('Please enter the authorization code');
+                return;
+            }
+
+            try {
+                showStatus('Exchanging authorization code for refresh token...');
+
+                const response = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        client_id: clientId,
+                        client_secret: clientSecret,
+                        code: authCode,
+                        grant_type: 'authorization_code',
+                        redirect_uri: 'http://localhost:3000/callback'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    console.error('OAuth Error Response:', data);
+                    throw new Error(`${data.error_description || data.error || 'Failed to get refresh token'} (Status: ${response.status})`);
+                }
+
+                if (!data.refresh_token) {
+                    throw new Error('No refresh token received. Make sure you selected "consent" during authorization.');
+                }
+
+                // Display the environment variables
+                const envVars = `GMAIL_CLIENT_ID=${clientId}
+GMAIL_CLIENT_SECRET=${clientSecret}
+GMAIL_REFRESH_TOKEN=${data.refresh_token}
+GMAIL_SENDER_EMAIL=your-email@gmail.com`;
+
+                document.getElementById('envVars').textContent = envVars;
+                document.getElementById('step4').classList.remove('hidden');
+                showStatus('Refresh token generated successfully!');
+
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+            }
+        }
+
+        function copyToClipboard() {
+            const envVars = document.getElementById('envVars').textContent;
+            navigator.clipboard.writeText(envVars).then(() => {
+                showStatus('Environment variables copied to clipboard!');
+            }).catch(() => {
+                showError('Failed to copy to clipboard. Please copy manually.');
+            });
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorDiv');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            setTimeout(() => {
+                errorDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        function showStatus(message) {
+            document.getElementById('statusDiv').textContent = message;
+        }
+    </script>
+</body>
+</html>

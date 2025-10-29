@@ -1,15 +1,15 @@
-// Configuratie data
+// Configuration data
 const productData = {
     knikarm: {
-        name: 'Knikarm',
+        name: 'Retractable Awning',
         models: [
-            { value: 'knikarm-model1', name: 'Knikarm Model 1', image: 'assets/models/model1.webp' }
+            { value: 'knikarm-model1', name: 'Retractable Awning Model 1', image: 'assets/models/model1.webp' }
         ]
     },
     markiezen: {
-        name: 'Markiezen',
+        name: 'Dutch Canopy',
         models: [
-            { value: 'markiezen-model1', name: 'Markiezen Model 1', image: 'assets/models/markiezen_real.jpg' }
+            { value: 'markiezen-model1', name: 'Dutch Canopy Model 1', image: 'assets/models/markiezen_real.jpg' }
         ]
     }
 }
@@ -55,22 +55,22 @@ function closePopup(button) {
 const colorOptions = [
     { 
         value: 'lichtgrijs-wit-gestreept', 
-        name: 'Lichtgrijs met Wit (Gestreept)', 
+        name: 'Light Grey & White (Striped)', 
         image: 'assets/colors/lichtgrijs-wit-gestreept.jpg' 
     },
     { 
         value: 'gebroken-wit-creme-gestreept', 
-        name: 'Gebroken Wit/Crème (Gestreept)', 
+        name: 'Off-White / Cream (Striped)', 
         image: 'assets/colors/gebroken-wit-creme-gestreept.jpg' 
     },
     { 
         value: 'loodgrijs-effen', 
-        name: 'Loodgrijs (Effen)', 
+        name: 'Dark Lead Grey (Solid)', 
         image: 'assets/colors/loodgrijs-effen.png' 
     },
     { 
         value: 'oranje', 
-        name: 'Oranje', 
+        name: 'Orange', 
         image: 'assets/colors/oranje.jpg' 
     }
 ];
@@ -358,10 +358,10 @@ function updateGenerateButton() {
     generateBtn.disabled = !isComplete;
     
     if (isComplete) {
-        generateBtn.textContent = 'Genereer Visualisatie';
+        generateBtn.textContent = 'Generate Visualization';
         generateBtn.classList.remove('disabled');
     } else {
-        generateBtn.textContent = 'Vul alle velden in om te genereren';
+        generateBtn.textContent = 'Fill all fields to generate';
         generateBtn.classList.add('disabled');
     }
 }
@@ -370,7 +370,7 @@ function generateVisualization() {
     if (generateBtn.disabled) return;
     
     // Show loading state
-    generateBtn.textContent = 'Genereren...';
+    generateBtn.textContent = 'Generating...';
     generateBtn.disabled = true;
     
     // Call API immediately
@@ -545,12 +545,12 @@ async function callVisualizationAPI() {
         
         // Validate API configuration
         if (!API_CONFIG.url || API_CONFIG.url === 'YOUR_EDGE_FUNCTION_URL_HERE') {
-            throw new Error('API configuratie ontbreekt. Controleer config.js.');
+            throw new Error('API configuration missing. Check config.js.');
         }
         
         // Validate required data
         if (!appState.houseImage) {
-            throw new Error('Ontbrekende gegevens: zorg ervoor dat u een afbeelding heeft geüpload.');
+            throw new Error('Missing data: please upload a photo first.');
         }
         
         // Composite the image with drawn line
@@ -559,13 +559,13 @@ async function callVisualizationAPI() {
         // Get model reference image
         const modelImageUrl = getSelectedModelImage();
         if (!modelImageUrl) {
-            throw new Error('Kon geen model afbeelding vinden.');
+            throw new Error('Model reference image not found.');
         }
         
         // Convert model image to base64
         const modelImageBase64 = await imageUrlToBase64(modelImageUrl);
         if (!modelImageBase64) {
-            throw new Error('Kon model afbeelding niet laden.');
+            throw new Error('Failed to load model reference image.');
         }
         
         // Get pattern information
@@ -728,7 +728,7 @@ async function callVisualizationAPI() {
         
         console.info(`[Edge] Status: ${response.status} ${response.statusText}`);
         if (!response.ok) {
-            throw new Error(`API fout: ${response.status} ${response.statusText}`);
+            throw new Error(`API error: ${response.status} ${response.statusText}`);
         }
         
         // Read raw response for debugging, then parse JSON
@@ -750,7 +750,7 @@ async function callVisualizationAPI() {
             console.warn('[Edge] Parsed JSON result:', result);
         } catch (parseErr) {
             console.error('[Edge] JSON parse failed:', parseErr);
-            throw new Error(`Ongeldige serverrespons (geen JSON).`);
+            throw new Error(`Invalid server response (not JSON).`);
         }
         
         // Handle successful response
@@ -774,7 +774,7 @@ async function callVisualizationAPI() {
         console.error('API Error:', error);
         
         // Reset button state
-        generateBtn.textContent = 'Genereer Visualisatie';
+        generateBtn.textContent = 'Generate Visualization';
         generateBtn.disabled = false;
     }
 }
@@ -785,12 +785,12 @@ function showLoadingState() {
         <div class="loading-state">
             <div class="spinner"></div>
             <div class="loading-content">
-                <h3>Bezig met genereren...</h3>
-                <p>Uw visualisatie wordt gegenereerd. Dit kan 30-90 seconden duren.</p>
+                <h3>Generating...</h3>
+                <p>Your visualization is being generated. This may take 30–90 seconds.</p>
                 <div class="progress-steps">
-                    <div class="step active">📸 Afbeelding analyseren</div>
-                    <div class="step">🎨 Zonnescherm plaatsen</div>
-                    <div class="step">✨ Resultaat optimaliseren</div>
+                    <div class="step active">📸 Analyzing image</div>
+                    <div class="step">🎨 Placing the awning</div>
+                    <div class="step">✨ Optimizing result</div>
                 </div>
             </div>
         </div>
@@ -805,14 +805,14 @@ function handleAPISuccess(result) {
     console.log('API Success:', result);
 
     // Show simple popup notification
-    const customerEmail = document.getElementById('customer-email').value;
-    showPopupNotification(`Uw visualisatie is begonnen! We sturen het per mail naar ${customerEmail} toe.`);
+    const customerEmail = document.getElementById('customer-email')?.value || document.getElementById('email')?.value || '';
+    showPopupNotification(`Your visualization has started! We will email it to ${customerEmail}.`);
     
     // Reset the form for a new visualization
     resetVisualization();
 
     // Reset button
-    generateBtn.textContent = 'Genereer Nieuwe Visualisatie';
+    generateBtn.textContent = 'Generate New Visualization';
     generateBtn.disabled = false;
 }
 

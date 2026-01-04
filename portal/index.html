@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zonwering Visualisatie Portal</title>
+    <link href="styles.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <div id="app">
+        <div style="text-align: center; padding: 50px; font-family: sans-serif; color: #666;">
+            <div class="loading-spinner" style="margin: 0 auto 20px;"></div>
+            <p>Portal laden...</p>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('error', function(e) {
+            document.body.insertAdjacentHTML('beforeend', `<div style="color: red; padding: 20px; background: #ffeeee; border-top: 1px solid red;">Error: ${e.message}</div>`);
+        });
+    </script>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

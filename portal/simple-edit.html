@@ -1,0 +1,717 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple Awning Edit</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu;max-width:900px;margin:40px auto;padding:0 20px}
+    .row{display:flex;gap:20px;flex-wrap:wrap}
+    .card{border:1px solid #ddd;border-radius:8px;padding:16px;flex:1}
+    img{max-width:100%;border-radius:8px}
+    button{background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 16px;font-size:15px;cursor:pointer}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    button.secondary{background:#64748b;margin-top:10px}
+    input{padding:8px}
+    .log{white-space:pre-wrap;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px}
+    .canvas-container { position: relative; display: inline-block; max-width: 100%; }
+    .canvas-container img { display: block; max-width: 100%; height: auto; }
+    #drawingCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+    
+    /* Color Swatch Styles */
+    .color-options { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+    .color-option { 
+        width: 40px; height: 40px; 
+        border-radius: 50%; 
+        border: 2px solid #ddd; 
+        cursor: pointer; 
+        position: relative;
+        background-size: cover;
+    }
+    .color-option.selected { border-color: #2563eb; box-shadow: 0 0 0 2px #bfdbfe; }
+    .color-option:hover { transform: scale(1.05); }
+  </style>
+</head>
+<body>
+  <h1>Simple Awning Edit</h1>
+  <div class="row">
+    <div class="card">
+      <div>House image (Draw a red line where awning should go)</div>
+      <input id="house" type="file" accept="image/*">
+      <div id="housePreview"></div>
+      <button id="clearBtn" class="secondary" style="display:none">Clear Line</button>
+    </div>
+    <div class="card">
+      <div>Awning Model Type</div>
+      <select id="awningType" style="width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 6px; border: 1px solid #ddd;">
+        <option value="knikarm">Knikarmscherm (Folding Arm)</option>
+        <option value="markies">Markies (Dutch Canopy)</option>
+        <option value="uitvalscherm">Uitvalscherm (Drop Arm)</option>
+      </select>
+
+      <div>Awning model image</div>
+      <input id="model" type="file" accept="image/*">
+      <div id="modelPreview"></div>
+      
+      <div style="margin-top: 12px;">Front bar reference (Voorlijst)</div>
+      <input id="frontbarRef" type="file" accept="image/*">
+      <div id="frontbarPreview"></div>
+      
+      <div style="margin-top: 15px;">
+        <div>Select Fabric Color (Optional)</div>
+        <div class="color-options">
+            <div class="color-option" data-color="oranje" style="background-image: url('../assets/colors/oranje.jpg')" title="Orange"></div>
+            <div class="color-option" data-color="loodgrijs-effen" style="background-image: url('../assets/colors/loodgrijs-effen.png')" title="Lead Grey"></div>
+            <div class="color-option" data-color="lichtgrijs-wit-gestreept" style="background-image: url('../assets/colors/lichtgrijs-wit-gestreept.jpg')" title="Light Grey/White Striped"></div>
+            <div class="color-option" data-color="gebroken-wit-creme-gestreept" style="background-image: url('../assets/colors/gebroken-wit-creme-gestreept.jpg')" title="Cream Striped"></div>
+        </div>
+        <input type="hidden" id="selectedColorId">
+      </div>
+
+      <div style="margin-top: 15px;">
+        <div>Select Frame Color</div>
+        <div style="display:flex; gap:15px; margin-top:5px;">
+            <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="frameColor" value="white" checked> White</label>
+            <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="frameColor" value="black"> Black</label>
+            <label style="display:flex; align-items:center; gap:5px; cursor:pointer;"><input type="radio" name="frameColor" value="gray"> Gray</label>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="margin:20px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+    <select id="modelSelect">
+      <option value="gemini-2.5-flash-image">gemini-2.5-flash-image</option>
+      <option value="gemini-3-pro-image-preview" selected>gemini-3-pro-image-preview</option>
+    </select>
+    <button id="run">Run Edit</button>
+    <button id="debugPayloadBtn" class="secondary" style="background-color: #6b7280;">Debug Payload</button>
+  </div>
+  <div class="card">
+    <div>Result</div>
+    <div id="result"></div>
+    <button id="copyResultBtn" class="secondary" style="display:none; margin-top:10px">Copy Image to Clipboard</button>
+    <button id="downloadResultBtn" class="secondary" style="display:none; margin-top:10px">Download Image</button>
+  </div>
+  <div class="card">
+    <div>Logs</div>
+    <div id="logs" class="log"></div>
+  </div>
+  <script src="../config.js?v=2.5"></script>
+  <script>
+    const houseInput = document.getElementById('house');
+    const modelInput = document.getElementById('model');
+    const frontbarInput = document.getElementById('frontbarRef');
+    const runBtn = document.getElementById('run');
+    const debugPayloadBtn = document.getElementById('debugPayloadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const copyResultBtn = document.getElementById('copyResultBtn');
+    const downloadResultBtn = document.getElementById('downloadResultBtn');
+    const resultDiv = document.getElementById('result');
+    const logsDiv = document.getElementById('logs');
+    const sel = document.getElementById('modelSelect');
+    const housePreview = document.getElementById('housePreview');
+    const colorOptions = document.querySelectorAll('.color-option');
+    const selectedColorInput = document.getElementById('selectedColorId');
+    const awningTypeSelect = document.getElementById('awningType');
+    
+    let defaultModelDataUrl = null;
+    let originalHouseImage = null; // Store the Image object
+    let currentResultBase64 = null;
+    let selectedColorUrl = null;
+    let frontbarRefDataUrl = null;
+
+    // Model switching logic
+    awningTypeSelect.addEventListener('change', async (e) => {
+        const type = e.target.value;
+        let modelPath = '../assets/models/model1.webp'; // default knikarm
+        if (type === 'markies') {
+            modelPath = '../assets/models/markiezen_reference_new.jpg';
+        } else if (type === 'uitvalscherm') {
+            modelPath = '../assets/models/input_uitvalscherm_2.webp';
+        }
+        
+        try {
+            const resp = await fetch(modelPath);
+            const blob = await resp.blob();
+            const r = new FileReader();
+            r.onload = () => {
+                defaultModelDataUrl = r.result;
+                document.getElementById('modelPreview').innerHTML = `<img src="${defaultModelDataUrl}" alt="${type} model">`;
+                log(`Switched to ${type} model: ${modelPath}`);
+            };
+            r.readAsDataURL(blob);
+        } catch (err) {
+            log(`Failed to load ${type} model: ${err.message}`);
+        }
+    });
+
+    function toDataUrl(file){
+      return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
+    }
+    function log(msg){logsDiv.textContent += (msg+"\n");}
+
+    // Color selection logic
+    colorOptions.forEach(opt => {
+        opt.addEventListener('click', () => {
+            console.log('Color swatch clicked:', opt.dataset.color);
+            // Toggle selection
+            if (opt.classList.contains('selected')) {
+                opt.classList.remove('selected');
+                selectedColorInput.value = '';
+                selectedColorUrl = null;
+                console.log('Color selection cleared');
+            } else {
+                colorOptions.forEach(o => o.classList.remove('selected'));
+                opt.classList.add('selected');
+                selectedColorInput.value = opt.dataset.color;
+                
+                // Extract URL from background-image
+                const bg = opt.style.backgroundImage;
+                if (bg) {
+                    const match = bg.match(/url\(['"]?([^'"]*)['"]?\)/);
+                    if (match && match[1]) {
+                        selectedColorUrl = match[1];
+                    }
+                }
+                console.log('Selected color:', selectedColorInput.value, 'URL:', selectedColorUrl);
+            }
+        });
+    });
+
+    // Drawing variables
+    let isDrawing = false;
+    let startX = 0;
+    let startY = 0;
+    let canvas, ctx;
+
+    function initCanvas(imgSrc) {
+        housePreview.innerHTML = '';
+        const container = document.createElement('div');
+        container.className = 'canvas-container';
+        
+        const img = new Image();
+        img.onload = () => {
+            originalHouseImage = img;
+            log(`Image Loaded: ${img.naturalWidth}x${img.naturalHeight} (Rendered: ${img.width}x${img.height})`);
+            
+            // Set canvas size to match image
+            canvas = document.createElement('canvas');
+            canvas.id = 'drawingCanvas';
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            
+            // Adjust canvas display size to match image display size if scaled by CSS
+            // But for simple edit, we'll rely on the container. 
+            // Ideally, we display the image at some reasonable size.
+            
+            ctx = canvas.getContext('2d');
+            
+            container.appendChild(img);
+            container.appendChild(canvas);
+            housePreview.appendChild(container);
+            clearBtn.style.display = 'inline-block';
+            
+            // Add event listeners
+            canvas.addEventListener('mousedown', startDraw);
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', stopDraw);
+            canvas.addEventListener('mouseout', stopDraw);
+            
+            // Touch support
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousedown', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                canvas.dispatchEvent(mouseEvent);
+            });
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const mouseEvent = new MouseEvent('mousemove', {
+                    clientX: touch.clientX,
+                    clientY: touch.clientY
+                });
+                canvas.dispatchEvent(mouseEvent);
+            });
+            canvas.addEventListener('touchend', () => {
+                const mouseEvent = new MouseEvent('mouseup', {});
+                canvas.dispatchEvent(mouseEvent);
+            });
+        };
+        img.src = imgSrc;
+    }
+
+    function getMousePos(evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+            x: (evt.clientX - rect.left) * scaleX,
+            y: (evt.clientY - rect.top) * scaleY
+        };
+    }
+
+    function startDraw(e) {
+        isDrawing = true;
+        const pos = getMousePos(e);
+        startX = pos.x;
+        startY = pos.y;
+    }
+
+    function draw(e) {
+        if (!isDrawing) return;
+        const pos = getMousePos(e);
+        
+        // Clear and redraw logic could be complex if we want to preview the line
+        // Simple approach: clear everything and draw one line from start to current
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = Math.max(5, canvas.width * 0.005); // Dynamic line width based on image size
+        ctx.lineCap = 'round';
+        ctx.stroke();
+    }
+
+    function stopDraw() {
+        if (isDrawing) {
+            isDrawing = false;
+        }
+    }
+
+    clearBtn.addEventListener('click', () => {
+        if (ctx && canvas) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+    });
+
+    houseInput.addEventListener('change', async () => {
+      const f = houseInput.files[0];
+      if (!f) return;
+      log(`File selected: ${f.name}, Size: ${(f.size/1024).toFixed(2)} KB`);
+      const d = await toDataUrl(f);
+      initCanvas(d);
+    });
+    
+    modelInput.addEventListener('change', async () => {
+      const f = modelInput.files[0];
+      if (!f) return;
+      const d = await toDataUrl(f);
+      document.getElementById('modelPreview').innerHTML = `<img src="${d}">`;
+    });
+    
+    frontbarInput.addEventListener('change', async () => {
+      const f = frontbarInput.files[0];
+      if (!f) { frontbarRefDataUrl = null; document.getElementById('frontbarPreview').innerHTML = ''; return; }
+      frontbarRefDataUrl = await toDataUrl(f);
+      document.getElementById('frontbarPreview').innerHTML = `<img src="${frontbarRefDataUrl}" alt="Voorlijst reference">`;
+      log('Loaded front bar reference image');
+    });
+
+    // Load default awning model from assets/models/model1.webp
+    (async () => {
+      try {
+        const resp = await fetch('../assets/models/model1.webp');
+        const blob = await resp.blob();
+        const r = new FileReader();
+        r.onload = () => {
+          defaultModelDataUrl = r.result;
+          document.getElementById('modelPreview').innerHTML = `<img src="${defaultModelDataUrl}" alt="Default model">`;
+          log('Loaded default model: assets/models/model1.webp');
+        };
+        r.onerror = (e) => { log('Failed to load default model: ' + e.message); };
+        r.readAsDataURL(blob);
+      } catch (e) {
+        log('Default model fetch failed: ' + e.message);
+      }
+    })();
+
+    async function getCompositedImage() {
+        if (!originalHouseImage || !canvas) return null;
+        
+        // Supabase Edge Function Limit: 6MB Request Body
+        // To be safe, we aim for a much smaller payload to avoid timeouts and slow uploads
+        // Target: ~5.5MB max for the base64 string (Increased for 3K/4K support)
+        const MAX_PAYLOAD_SIZE = 5500000; 
+        
+        // CRITICAL FIX: Use naturalWidth/Height to get source resolution, NOT rendered screen size
+        let width = originalHouseImage.naturalWidth;
+        let height = originalHouseImage.naturalHeight;
+        log(`Compositing Source Dimensions: ${width}x${height}`);
+
+        let quality = 0.95; // Increased starting quality
+        let scale = 1.0;
+        
+        // Initial max dimension check
+        // Increased to 3840 to support 4K inputs for Gemini 3 Pro
+        const MAX_DIMENSION = 3840;
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+             const ratio = Math.min(MAX_DIMENSION / width, MAX_DIMENSION / height);
+             scale = ratio;
+        }
+        
+        let dataUrl = null;
+        let attempts = 0;
+        
+        // Optimized Compression Strategy
+        // We want to preserve RESOLUTION (pixels) as much as possible.
+        // It is better to lower JPEG quality than to downscale dimensions for AI input.
+        
+        while (attempts < 15) { // Allow more attempts for fine-tuning
+            const w = Math.floor(width * scale);
+            const h = Math.floor(height * scale);
+            
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = w;
+            tempCanvas.height = h;
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // Draw original image (scaled)
+            tempCtx.drawImage(originalHouseImage, 0, 0, w, h);
+            
+            // Draw the red line on top (scaled)
+            if (canvas) {
+                tempCtx.drawImage(canvas, 0, 0, w, h);
+            }
+            
+            // Generate Base64
+            dataUrl = tempCanvas.toDataURL('image/jpeg', quality);
+            const sizeMB = dataUrl.length / 1024 / 1024;
+            
+            log(`Attempt ${attempts + 1}: ${w}x${h}, Q=${quality.toFixed(2)} -> ${sizeMB.toFixed(2)} MB`);
+            
+            if (dataUrl.length < MAX_PAYLOAD_SIZE) {
+                return { dataUrl, width: w, height: h };
+            }
+            
+            // Compression Logic
+            // If we are WAY over limit (> 7MB), we must resize.
+            // If we are close (e.g. 5-6MB), try reducing quality first.
+            
+            if (sizeMB > 7.0) {
+                 scale *= 0.85; // Big drop for big files
+            } else if (quality > 0.70) {
+                 quality -= 0.1; // Drop quality significantly to save pixels
+            } else {
+                 scale *= 0.90; // If quality is already low, we must resize
+            }
+            
+            if (quality < 0.5) quality = 0.5;
+            if (scale < 0.1) scale = 0.1; // Safety brake
+            
+            attempts++;
+        }
+        
+        return { dataUrl, width: Math.floor(width*scale), height: Math.floor(height*scale) };
+    }
+
+    async function copyImageToClipboard(base64) {
+        try {
+            const response = await fetch(base64);
+            const blob = await response.blob();
+            await navigator.clipboard.write([
+                new ClipboardItem({
+                    [blob.type]: blob
+                })
+            ]);
+            alert('Image copied to clipboard!');
+        } catch (err) {
+            console.error('Failed to copy: ', err);
+            alert('Failed to copy image to clipboard. Your browser might not support this feature.');
+        }
+    }
+
+    copyResultBtn.addEventListener('click', () => {
+        if (currentResultBase64) {
+            copyImageToClipboard(currentResultBase64);
+        }
+    });
+
+    downloadResultBtn.addEventListener('click', () => {
+        if (currentResultBase64) {
+            const a = document.createElement('a');
+            a.href = currentResultBase64;
+            a.download = 'edited-awning.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+    });
+
+    debugPayloadBtn.addEventListener('click', async () => {
+        resultDiv.innerHTML = '';
+        logsDiv.textContent = '';
+        log('Starting Payload Debug...');
+        
+        if (!originalHouseImage) {
+            alert('Select a house image first');
+            return;
+        }
+
+        try {
+            log(`Original Image: ${originalHouseImage.width}x${originalHouseImage.height}`);
+            
+            const start = performance.now();
+            const compositedResult = await getCompositedImage();
+            const end = performance.now();
+            
+            if (!compositedResult) {
+                throw new Error("Failed to composite image");
+            }
+            
+            const { dataUrl, width, height } = compositedResult;
+            const sizeMB = (dataUrl.length / 1024 / 1024).toFixed(2);
+            
+            log(`----------------------------------------`);
+            log(`PAYLOAD GENERATED in ${(end - start).toFixed(0)}ms`);
+            log(`Dimensions: ${width}x${height}`);
+            log(`Size: ${sizeMB} MB`);
+            log(`Base64 Length: ${dataUrl.length} chars`);
+            
+            // Show result
+            resultDiv.innerHTML = `
+                <div style="margin-bottom:10px; font-weight:bold">This is EXACTLY what will be sent to the AI:</div>
+                <img src="${dataUrl}" style="max-width:100%; border:2px solid red;">
+                <div style="margin-top:10px; font-size:12px; color:#666">
+                    Right-click image and "Open in New Tab" to inspect full resolution.
+                </div>
+            `;
+            
+            currentResultBase64 = dataUrl;
+            downloadResultBtn.style.display = 'inline-block';
+            
+        } catch (e) {
+            log('Debug Error: ' + e.message);
+            console.error(e);
+        }
+    });
+
+    runBtn.addEventListener('click', async () => {
+      resultDiv.innerHTML = '';
+      copyResultBtn.style.display = 'none';
+      downloadResultBtn.style.display = 'none';
+      currentResultBase64 = null;
+      logsDiv.textContent = '';
+      // const hf = houseInput.files[0]; // No longer using file input directly
+      const mf = modelInput.files[0];
+      
+      if (!originalHouseImage){alert('Select a house image');return;}
+      
+      const selectedColorId = selectedColorInput.value;
+      
+      // Get selected frame color
+      const frameColorInput = document.querySelector('input[name="frameColor"]:checked');
+      const frameColor = frameColorInput ? frameColorInput.value : 'white';
+
+      runBtn.disabled = true;
+      try{
+        // const house = await toDataUrl(hf);
+        // Use composited image instead
+        log('Compositing image with drawing...');
+        const compositedResult = await getCompositedImage();
+        if (!compositedResult) {
+             throw new Error("Failed to composite image");
+        }
+        const house = compositedResult.dataUrl;
+        const width = compositedResult.width;
+        const height = compositedResult.height;
+        
+        let model = null;
+        if (mf) {
+          model = await toDataUrl(mf);
+        } else if (defaultModelDataUrl) {
+          model = defaultModelDataUrl;
+        } else {
+          alert('Select an awning model image');
+          runBtn.disabled = false;
+          return;
+        }
+        
+        let colorSwatchBase64 = null;
+        if (selectedColorUrl) {
+            try {
+                log('Loading color swatch...');
+                const resp = await fetch(selectedColorUrl);
+                const blob = await resp.blob();
+                colorSwatchBase64 = await toDataUrl(blob);
+                log('Color swatch loaded.');
+            } catch (e) {
+                log('Failed to load color swatch: ' + e.message);
+            }
+        }
+
+        // Determine URL with fallback safety
+        let primaryUrl = 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/knikarm'; // Default hardcoded
+        let functionName = 'knikarm';
+
+        if (window.API_CONFIG) {
+            // Check if specific keys exist, otherwise fallback to generic url or hardcoded defaults
+            if (awningTypeSelect.value === 'knikarm') {
+                 primaryUrl = window.API_CONFIG.knikarmUrl || window.API_CONFIG.url || 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/knikarm';
+                 functionName = 'knikarm';
+            } else if (awningTypeSelect.value === 'markies') {
+                 primaryUrl = window.API_CONFIG.markiesUrl || 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/markies';
+                 functionName = 'markies';
+            } else if (awningTypeSelect.value === 'uitvalscherm') {
+                 primaryUrl = window.API_CONFIG.uitvalschermUrl || 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/rapid-responder';
+                 functionName = 'rapid-responder';
+            }
+        } else {
+            // No API_CONFIG found, use manual fallback
+            functionName = awningTypeSelect.value === 'uitvalscherm' ? 'rapid-responder' : awningTypeSelect.value;
+            primaryUrl = 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/' + functionName;
+        }
+
+        if (!primaryUrl) {
+            log('Error: Could not determine primary URL. Defaulting to Knikarm.');
+            primaryUrl = 'https://pbexvaqypzlftjsaqjfq.supabase.co/functions/v1/knikarm';
+            functionName = 'knikarm';
+        }
+
+        const altUrl = primaryUrl.replace('.supabase.co/functions/v1/', '.functions.supabase.co/');
+
+        const headers = { 'Content-Type':'application/json' };
+        if (window.API_CONFIG && window.API_CONFIG.key) {
+          headers['Authorization'] = 'Bearer ' + window.API_CONFIG.key;
+          headers['apikey'] = window.API_CONFIG.key;
+        }
+        headers['Accept'] = 'application/json';
+        headers['x-edge-function-name'] = functionName;
+
+        const payloadSize = house.length + (model ? model.length : 0);
+        log(`Payload size: ${(payloadSize/1024/1024).toFixed(2)} MB`);
+
+        log('Calling: ' + primaryUrl);
+        let res;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(()=>controller.abort(), 600000); // 10 minute timeout for markies
+        
+        const requestBody = { 
+            image_data: house, 
+            awning_reference_image: model, 
+            model: sel.value, 
+            color_id: selectedColorId || undefined, // Keep for logging if needed
+            color_swatch_image: colorSwatchBase64 || undefined,
+            frame_color: frameColor,
+            awning_type: awningTypeSelect.value,
+            extra_reference_images: frontbarRefDataUrl ? [frontbarRefDataUrl] : undefined,
+            width: width,
+            height: height
+        };
+        
+        try {
+          res = await fetch(primaryUrl,{ method:'POST', headers, cache:'no-store', body: JSON.stringify(requestBody), signal: controller.signal });
+          clearTimeout(timeoutId);
+        } catch (e) {
+          clearTimeout(timeoutId);
+          log('Primary failed, trying alternate domain...');
+          const controller2 = new AbortController();
+          const timeoutId2 = setTimeout(()=>controller2.abort(), 600000); // 10 minute timeout
+          try {
+            res = await fetch(altUrl,{ method:'POST', headers, cache:'no-store', body: JSON.stringify(requestBody), signal: controller2.signal });
+          } finally {
+            clearTimeout(timeoutId2);
+          }
+        }
+        
+        const j = await res.json();
+        log('Status: ' + res.status);
+        // log(JSON.stringify(j, null, 2)); // Too verbose
+        if (j.error) {
+             log('Error: ' + JSON.stringify(j.error, null, 2));
+        } else if (j.edited_image){ 
+            resultDiv.innerHTML = `<img src="${j.edited_image}" alt="result">`;
+            currentResultBase64 = j.edited_image;
+            copyResultBtn.style.display = 'inline-block';
+            downloadResultBtn.style.display = 'inline-block';
+            
+            // Display model match verification
+            if (j.model_match) {
+                const matchColor = j.model_match.match ? 'green' : 'orange';
+                const matchText = j.model_match.match ? 'Matches Model' : 'Model Mismatch';
+                const matchDiv = document.createElement('div');
+                matchDiv.style.marginTop = '10px';
+                matchDiv.style.padding = '10px';
+                matchDiv.style.border = `1px solid ${matchColor}`;
+                matchDiv.style.borderRadius = '6px';
+                matchDiv.style.backgroundColor = j.model_match.match ? '#f0fdf4' : '#fff7ed';
+                matchDiv.innerHTML = `<strong style="color:${matchColor}">${matchText}</strong><br>${j.model_match.explanation || ''}`;
+                resultDiv.appendChild(matchDiv);
+            }
+
+            if (j.original_dims && j.raw_generated_dims) {
+                const debugDiv = document.createElement('div');
+                debugDiv.style.marginTop = '10px';
+                debugDiv.style.padding = '10px';
+                debugDiv.style.border = '1px solid #ccc';
+                debugDiv.style.borderRadius = '6px';
+                debugDiv.style.backgroundColor = '#f9fafb';
+                debugDiv.style.fontSize = '12px';
+                debugDiv.innerHTML = `
+                    <strong>Debug Info:</strong><br>
+                    Input Size: ${j.original_dims.width}x${j.original_dims.height}<br>
+                    Raw Generated Size: ${j.raw_generated_dims.width}x${j.raw_generated_dims.height}<br>
+                    Final Output Size: ${j.generated_dims.width}x${j.generated_dims.height}<br>
+                    Model: ${j.model}
+                `;
+                resultDiv.appendChild(debugDiv);
+            }
+
+            const hasTiming = (typeof j.total_duration_ms === 'number') || (Array.isArray(j.attempt_durations_ms)) || (typeof j.loop_duration_ms === 'number');
+            if (hasTiming) {
+                const timingDiv = document.createElement('div');
+                timingDiv.style.marginTop = '10px';
+                timingDiv.style.padding = '10px';
+                timingDiv.style.border = '1px solid #ccc';
+                timingDiv.style.borderRadius = '6px';
+                timingDiv.style.backgroundColor = '#eef6ff';
+                timingDiv.style.fontSize = '12px';
+                const totalMs = typeof j.total_duration_ms === 'number' ? j.total_duration_ms : null;
+                const loopMs = typeof j.loop_duration_ms === 'number' ? j.loop_duration_ms : null;
+                const attemptsMade = typeof j.attempts_made === 'number' ? j.attempts_made : null;
+                const attemptDurations = Array.isArray(j.attempt_durations_ms) ? j.attempt_durations_ms : [];
+                const widthErrors = Array.isArray(j.width_errors) ? j.width_errors : [];
+                const totalSec = totalMs != null ? (totalMs/1000).toFixed(1) : 'n/a';
+                const loopSec = loopMs != null ? (loopMs/1000).toFixed(1) : 'n/a';
+                const attemptsStr = attemptsMade != null ? attemptsMade : attemptDurations.length || 'n/a';
+                const attemptRows = attemptDurations.map((ms, idx) => {
+                    const err = widthErrors[idx] || {};
+                    const ldx = typeof err.left_dx === 'number' ? err.left_dx : 'n/a';
+                    const rdx = typeof err.right_dx === 'number' ? err.right_dx : 'n/a';
+                    const wdx = typeof err.width_dx === 'number' ? err.width_dx : 'n/a';
+                    return `<tr><td style="padding:4px 8px;">${idx+1}</td><td style="padding:4px 8px;">${(ms/1000).toFixed(1)}s</td><td style="padding:4px 8px;">${ldx}</td><td style="padding:4px 8px;">${rdx}</td><td style="padding:4px 8px;">${wdx}</td></tr>`;
+                }).join('');
+                timingDiv.innerHTML = `
+                    <strong>Timing & Placement Stats:</strong><br>
+                    Total Duration: ${totalSec}s<br>
+                    Winning Model Loop: ${loopSec}s<br>
+                    Attempts Made: ${attemptsStr}
+                    ${attemptDurations.length ? `<div style="margin-top:6px;">Attempts</div><table style="border-collapse:collapse;border:1px solid #ddd;margin-top:4px;">
+                      <thead><tr><th style="padding:4px 8px;text-align:left;">Attempt</th><th style="padding:4px 8px;text-align:left;">Duration</th><th style="padding:4px 8px;text-align:left;">Left Δpx</th><th style="padding:4px 8px;text-align:left;">Right Δpx</th><th style="padding:4px 8px;text-align:left;">Width Δpx</th></tr></thead>
+                      <tbody>${attemptRows}</tbody>
+                    </table>` : ''}
+                `;
+                resultDiv.appendChild(timingDiv);
+                log(`Total generation time: ${totalSec}s; attempts: ${attemptsStr}`);
+            }
+            
+            log('Success!');
+        }
+      }catch(e){ 
+        console.error(e);
+        if (e.message === 'Failed to fetch') {
+            log('Error: Connection failed or timed out. The model might be overloaded or the image generation took too long. Please try again in a moment.');
+        } else {
+            log('Error: ' + e.message); 
+        }
+      }
+      runBtn.disabled = false;
+    });
+  </script>
+</body>
+</html>

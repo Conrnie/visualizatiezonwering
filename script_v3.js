@@ -41,7 +41,7 @@ const productData = {
             { 
                 value: 'uitvalscherm-model1', 
                 name: 'Drop Arm Awning Model 1', 
-                image: 'assets/models/uitvalscherm_new.jpg?v=2'
+                image: 'assets/models/uitvalscherm.jpeg'
             }
         ]
     }
@@ -833,7 +833,7 @@ async function callVisualizationAPI() {
         // Determine which endpoint to use based on price indication data
         let apiUrl = priceData ? API_CONFIG.priceIndicationUrl : API_CONFIG.url;
         let endpointType = priceData ? 'smooth-function (price indication)' : 'hyper-worker (visualization)';
-        
+
         // Select specific edge function based on product type
         if (!priceData) {
             if (appState.productType === 'knikarm') {
@@ -851,7 +851,6 @@ async function callVisualizationAPI() {
         console.log(`[DEBUG] API_CONFIG.priceIndicationUrl:`, API_CONFIG.priceIndicationUrl);
         console.log(`[DEBUG] API_CONFIG.url:`, API_CONFIG.url);
         console.log(`[DEBUG] priceData truthy:`, !!priceData);
-        console.log(`[DEBUG] appState.productType:`, appState.productType);
         console.log(`[DEBUG] Selected apiUrl:`, apiUrl);
         console.log(`[Edge] Using endpoint: ${endpointType} - ${apiUrl}`);
         

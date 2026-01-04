@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { decode, encode } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
 const GMAIL_CLIENT_ID = Deno.env.get('GMAIL_CLIENT_ID');
@@ -39,7 +40,10 @@ class GmailAPIService {
     return this.accessToken;
   }
   async sendEmail(to, subject, htmlContent, attachments = []) {
+    console.log('=== SEND EMAIL METHOD START ===');
+    console.log('Getting access token...');
     const accessToken = await this.getAccessToken();
+    console.log('Access token obtained successfully');
     const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     let email = [
       `From: ${this.senderEmail}`,
@@ -69,29 +73,68 @@ class GmailAPIService {
       email.push('');
     });
     email.push(`--${boundary}--`);
+    
+    console.log('Encoding email content...');
+    console.log('Email parts count:', email.length);
+    console.log('Total email content length:', email.join('\r\n').length);
+    
     let rawEmail;
     try {
       rawEmail = encode(email.join('\r\n'));
+      console.log('Email encoded successfully, base64 length:', rawEmail.length);
     } catch (error) {
       console.error('Failed to encode email content:', error);
       console.error('Email subject:', subject);
       throw new Error('Email content encoding failed');
     }
-    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        raw: rawEmail
-      })
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(`Gmail API error: ${result.error.message}`);
+
+    // Retry logic for network issues
+    const maxRetries = 3;
+    const retryDelays = [1000, 2000, 4000]; // 1s, 2s, 4s
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`Sending email attempt ${attempt + 1}/${maxRetries + 1}`);
+        
+        const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            raw: rawEmail
+          })
+        });
+        
+        const result = await response.json();
+        if (!response.ok) {
+          throw new Error(`Gmail API error: ${result.error?.message || 'Unknown error'}`);
+        }
+        
+        console.log(`Email sent successfully on attempt ${attempt + 1}`);
+        return result;
+        
+      } catch (error) {
+        const isNetworkError = error.message.includes('connection reset') || 
+                              error.message.includes('connection error') ||
+                              error.message.includes('network error') ||
+                              error.message.includes('ECONNRESET');
+        
+        if (isNetworkError && attempt < maxRetries) {
+          console.log(`Network error on attempt ${attempt + 1}, retrying in ${retryDelays[attempt]}ms...`);
+          console.log(`Error details: ${error.message}`);
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+          continue;
+        }
+        
+        // If it's not a network error or we've exhausted retries, throw the error
+        console.error(`Email sending failed after ${attempt + 1} attempts:`, error.message);
+        throw error;
+      }
     }
-    return result;
   }
   async sendStartNotification(customerEmail, customerName) {
     const subject = 'Your Awning Visualization Is Being Prepared';
@@ -125,7 +168,22 @@ class GmailAPIService {
     return await this.sendEmail(customerEmail, subject, htmlContent);
   }
   async sendCompletionNotification(customerEmail, customerName, awningType, processedImage, goalAchieved, score, priceData = null) {
+    console.log('=== COMPLETION EMAIL START ===');
+    console.log('Parameters received:');
+    console.log('- customerEmail:', customerEmail);
+    console.log('- customerName:', customerName);
+    console.log('- awningType:', awningType);
+    console.log('- processedImage length:', processedImage ? processedImage.length : 'null');
+    console.log('- goalAchieved:', goalAchieved);
+    console.log('- score:', score);
+    console.log('- priceData:', !!priceData);
+    
+    // Get display name for awning type
+    const calculator = new PriceCalculator();
+    const awningDisplayName = calculator.getAwningDisplayName(awningType);
+    
     const subject = goalAchieved ? 'Your Awning Visualization Is Ready!' : 'Your Awning Visualization – Result Available';
+    console.log('Email subject:', subject);
     const priceSection = priceData ? `
       <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
         <h3 style="color: #2c3e50; margin-top: 0;">💰 Price Estimate</h3>
@@ -166,7 +224,7 @@ class GmailAPIService {
           <div style="text-align: center; margin: 20px 0;">
             <h3 style="color: #2c3e50;">🏠 Your Awning Visualization</h3>
             <img src="cid:visualization" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" alt="Awning visualization">
-            <p style="color: #666; font-size: 12px; margin-top: 10px;">This is how your new ${awningType} awning could look</p>
+            <p style="color: #666; font-size: 12px; margin-top: 10px;">This is how your new ${awningDisplayName} could look</p>
           </div>
           
           ${priceData ? `
@@ -174,8 +232,8 @@ class GmailAPIService {
             <h3 style="color: #2c3e50; margin-top: 0;">📋 Specifications</h3>
             <ul style="color: #555; line-height: 1.8;">
               <li><strong>Awning type:</strong> ${priceData.awningType}</li>
-              <li><strong>Dimensions:</strong> ${priceData.width}cm wide × ${priceData.projection}cm projection</li>
-              <li><strong>Area:</strong> ${priceData.area} m²</li>
+              <li><strong>Dimensions:</strong> ${cmToFeet(priceData.width)}ft wide × ${cmToFeet(priceData.projection)}ft projection</li>
+              <li><strong>Area:</strong> ${sqMeterToSqFeet(priceData.area)} sq ft</li>
               <li><strong>Floor:</strong> ${priceData.floor}</li>
               <li><strong>Color:</strong> ${priceData.fabricColor || 'Standard'}</li>
             </ul>
@@ -200,17 +258,76 @@ class GmailAPIService {
     // Prepare attachments
     const attachments = [];
     if (processedImage) {
-      // Extract base64 data from data URI
-      const base64Match = processedImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
-      const base64Data = base64Match ? base64Match[1] : processedImage;
-      attachments.push({
-        filename: 'awning_visualization.jpg',
-        mimeType: 'image/jpeg',
-        base64Data: base64Data,
-        contentId: 'visualization'
-      });
+      try {
+        // Extract base64 data from data URI
+        const base64Match = processedImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
+        let base64Data = base64Match ? base64Match[1] : processedImage;
+        
+        // Check image size (base64 is ~33% larger than binary)
+        const estimatedSizeBytes = (base64Data.length * 3) / 4;
+        const maxSizeBytes = 20 * 1024 * 1024; // 20MB limit for safety
+        
+        console.log(`Image size: ${(estimatedSizeBytes / 1024 / 1024).toFixed(2)}MB`);
+        
+        if (estimatedSizeBytes > maxSizeBytes) {
+          console.log('Image too large for email, compressing...');
+          
+          // Decode base64 to get image data
+          const imageData = decode(base64Data);
+          
+          // Load image and compress
+          const image = await Image.decode(imageData);
+          
+          // Calculate new dimensions (max 1200px width while maintaining aspect ratio)
+          const maxWidth = 1200;
+          let newWidth = image.width;
+          let newHeight = image.height;
+          
+          if (newWidth > maxWidth) {
+            const ratio = maxWidth / newWidth;
+            newWidth = maxWidth;
+            newHeight = Math.round(newHeight * ratio);
+          }
+          
+          // Resize if needed
+          if (newWidth !== image.width || newHeight !== image.height) {
+            console.log(`Resizing image from ${image.width}x${image.height} to ${newWidth}x${newHeight}`);
+            image.resize(newWidth, newHeight);
+          }
+          
+          // Encode as JPEG with quality 80
+          const compressedImageData = await image.encodeJPEG(80);
+          base64Data = encode(compressedImageData);
+          
+          const newSizeBytes = (base64Data.length * 3) / 4;
+          console.log(`Compressed image size: ${(newSizeBytes / 1024 / 1024).toFixed(2)}MB`);
+        }
+        
+        attachments.push({
+          filename: 'awning_visualization.jpg',
+          mimeType: 'image/jpeg',
+          base64Data: base64Data,
+          contentId: 'visualization'
+        });
+      } catch (error) {
+        console.error('Error processing image for email attachment:', error);
+        // Continue without attachment if image processing fails
+        console.log('Sending email without image attachment due to processing error');
+      }
     }
-    return await this.sendEmail(customerEmail, subject, htmlContent, attachments);
+    
+    console.log('=== CALLING SEND EMAIL ===');
+    console.log('- To:', customerEmail);
+    console.log('- Subject:', subject);
+    console.log('- Attachments count:', attachments.length);
+    console.log('- HTML content length:', htmlContent.length);
+    
+    const result = await this.sendEmail(customerEmail, subject, htmlContent, attachments);
+    
+    console.log('=== COMPLETION EMAIL SUCCESS ===');
+    console.log('Email sent result:', result);
+    
+    return result;
   }
 }
 // Price calculation logic
@@ -222,7 +339,8 @@ class PriceCalculator {
       'knikarmscherm': 85,
       'uitvalarm': 75,
       'uitvalscherm': 75,
-      'markiezen': 95
+      'markiezen': 95,
+      'canopy': 100
     };
     // Installation costs based on floor level
     this.installationCosts = {
@@ -285,11 +403,24 @@ class PriceCalculator {
       'knikarmscherm': 'Retractable Awning',
       'uitvalarm': 'Drop Arm Awning',
       'uitvalscherm': 'Drop Arm Awning',
-      'markiezen': 'Dutch Canopy'
+      'markiezen': 'Dutch Canopy',
+      'canopy': 'Canopy Awning'
     };
     return awningNames[awningType] || awningType;
   }
 }
+
+// Helper functions for imperial unit conversion
+function cmToFeet(cm) {
+  const feet = cm / 30.48;
+  return feet.toFixed(1);
+}
+
+function sqMeterToSqFeet(sqM) {
+  const sqFeet = sqM * 10.764;
+  return sqFeet.toFixed(1);
+}
+
 // Initialize Gmail service
 let gmailService = null;
 console.log('DEBUG: Gmail environment variables check:');
@@ -336,14 +467,22 @@ Deno.serve(async (req)=>{
     console.log('Processing request...');
     // Parse request body
     const body = await req.json();
-    const { image_data, new_awning_type, new_fabric_color, pattern_type, stripe_ratio, color_swatch_image, customer_email, customer_name, send_notifications, width, projection, verdieping, include_price_indication = false } = body;
+    const { image_data, new_awning_type, new_awning_model, new_fabric_color, pattern_type, stripe_ratio, color_swatch_image, new_awning_reference_image, additional_reference_images, customer_email, customer_name, send_notifications, width, projection, verdieping, include_price_indication = false } = body;
     console.log('Debug - Extracted request parameters:');
     console.log('- image_data:', !!image_data);
     console.log('- new_awning_type:', new_awning_type);
+    console.log('- new_awning_model:', new_awning_model);
     console.log('- new_fabric_color:', new_fabric_color);
     console.log('- pattern_type:', pattern_type);
     console.log('- stripe_ratio:', stripe_ratio);
     console.log('- color_swatch_image:', !!color_swatch_image);
+    console.log('- new_awning_reference_image (boolean):', !!new_awning_reference_image);
+    console.log('- new_awning_reference_image (type):', typeof new_awning_reference_image);
+    console.log('- new_awning_reference_image (value):', new_awning_reference_image);
+    console.log('- additional_reference_images (boolean):', !!additional_reference_images);
+    console.log('- additional_reference_images (type):', typeof additional_reference_images);
+    console.log('- additional_reference_images (length):', Array.isArray(additional_reference_images) ? additional_reference_images.length : 'N/A');
+
     console.log('- customer_email:', customer_email);
     console.log('- customer_name:', customer_name);
     console.log('- send_notifications:', send_notifications);
@@ -351,6 +490,73 @@ Deno.serve(async (req)=>{
     console.log('- projection:', projection);
     console.log('- floor (verdieping):', verdieping);
     console.log('- include_price_indication:', include_price_indication);
+    
+    // Awning type mapping (normalize inputs to supported internal types)
+    let effectiveAwningType = new_awning_type;
+    // Map traditional variants to 'markiezen'
+    if (new_awning_model === 'markiezen-model1' ||
+        new_awning_type === 'markiezen' ||
+        new_awning_type === 'markies' ||
+        new_awning_type === 'markise' ||
+        new_awning_type === 'markiezen-model1') {
+      effectiveAwningType = 'markiezen';
+    }
+    // Map canopy variants to 'canopy'
+    if (new_awning_model === 'canopy-model1' ||
+        new_awning_type === 'canopy' ||
+        new_awning_type === 'canopy-awning' ||
+        new_awning_type === 'storefront-canopy') {
+      effectiveAwningType = 'canopy';
+    }
+    
+    console.log('- original_awning_type:', new_awning_type);
+    console.log('- awning_model:', new_awning_model);
+    console.log('- effective_awning_type:', effectiveAwningType);
+    
+    // Type-specific debug logging
+    if (effectiveAwningType === 'markiezen') {
+      console.log('=== MARKIEZEN DEBUG INFO ===');
+      console.log('- new_awning_type:', new_awning_type);
+      console.log('- new_awning_model:', new_awning_model);
+      console.log('- effectiveAwningType:', effectiveAwningType);
+      console.log('- This should generate a TRADITIONAL FIXED CANOPY awning');
+      console.log('============================');
+    }
+    if (effectiveAwningType === 'canopy') {
+      console.log('=== CANOPY DEBUG INFO ===');
+      console.log('- new_awning_type:', new_awning_type);
+      console.log('- new_awning_model:', new_awning_model);
+      console.log('- effectiveAwningType:', effectiveAwningType);
+      console.log('- This should generate a MODERN FIXED CANOPY awning');
+      console.log('==========================');
+    }
+    
+    // Establish model reference with type-specific defaults if missing
+    let modelRef = typeof new_awning_reference_image === 'string' ? new_awning_reference_image : '';
+    if (effectiveAwningType === 'canopy' && (!modelRef || !modelRef.trim())) {
+      modelRef = '/Users/konniet/Downloads/canopy_selectmodel.jpeg';
+      console.log('[DEBUG] Using default canopy select-model reference image');
+    }
+    if ((effectiveAwningType === 'uitvalscherm' || effectiveAwningType === 'uitvalarm') && (!modelRef || !modelRef.trim())) {
+      modelRef = '/Users/konniet/Downloads/visualizatiezonwering/assets/models/uitvalscherm.jpeg';
+      console.log('[DEBUG] Using default uitvalscherm select-model reference image');
+    }
+    const hasModelReference = !!(modelRef && modelRef.trim());
+    console.log('- hasModelReference:', hasModelReference);
+    console.log('- modelRef after trim check:', modelRef && modelRef.trim ? modelRef.trim() : 'N/A');
+    // Build effective additional references list; add type-specific background defaults if needed
+    let effectiveAdditionalReferences = Array.isArray(additional_reference_images) ? [...additional_reference_images] : [];
+    if (effectiveAwningType === 'canopy' && effectiveAdditionalReferences.length === 0) {
+      // Default background reference image for canopy awnings if none provided
+      effectiveAdditionalReferences.push('/Users/konniet/Downloads/canopy-awning.jpg');
+      console.log('[DEBUG] Added default canopy background reference image');
+    }
+    if ((effectiveAwningType === 'uitvalscherm' || effectiveAwningType === 'uitvalarm') && effectiveAdditionalReferences.length === 0) {
+      // Default background reference image for uitvalscherm awnings if none provided
+      effectiveAdditionalReferences.push('/Users/konniet/Downloads/uitvalscherm-background.jpg');
+      console.log('[DEBUG] Added default uitvalscherm background reference image');
+    }
+    
     // Validate required parameters
     if (!image_data || !new_awning_type) {
       return new Response(JSON.stringify({
@@ -370,7 +576,7 @@ Deno.serve(async (req)=>{
       // Validate dimensions
       if (width < 100 || width > 800 || projection < 50 || projection > 400) {
         return new Response(JSON.stringify({
-          error: 'Invalid dimensions. Width must be 100-800cm, projection must be 50-400cm'
+          error: 'Invalid dimensions. Width must be 3.3-26.2ft, projection must be 1.6-13.1ft'
         }), {
           status: 400,
           headers: {
@@ -399,13 +605,18 @@ Deno.serve(async (req)=>{
       console.log('Price calculation completed:', priceData);
     }
     // Send start notification email
+    // Auto-email policy: send emails automatically for price requests or when notifications are requested
+    const shouldSendEmails = !!((include_price_indication || send_notifications) && customer_email && gmailService);
+    console.log('DEBUG: Auto-email policy -> shouldSendEmails:', shouldSendEmails);
     let startEmailSent = false;
     console.log('DEBUG: Checking start email conditions:');
+    console.log('- include_price_indication:', include_price_indication);
     console.log('- send_notifications:', send_notifications);
     console.log('- customer_email:', customer_email);
     console.log('- gmailService:', !!gmailService);
+    console.log('- shouldSendEmails:', shouldSendEmails);
     
-    if (send_notifications && customer_email && gmailService) {
+    if (shouldSendEmails) {
       console.log('DEBUG: All conditions met, attempting to send start email...');
       try {
         await gmailService.sendStartNotification(customer_email, customer_name);
@@ -418,6 +629,36 @@ Deno.serve(async (req)=>{
       }
     } else {
       console.log('DEBUG: Start email not sent - conditions not met');
+    }
+
+    // Continue with main image processing
+    console.log('Starting main image processing...');
+    
+    // Main processing function
+    async function executeMainProcessing() {
+    // Parse the input image
+    const parsed = await parseDataUri(image_data);
+    const imageBase64 = parsed?.base64Data;
+    // Parse reference image if provided
+    const modelReferenceParsed = hasModelReference ? await parseDataUri(modelRef) : null;
+    console.log('[DEBUG] modelReferenceParsed:', !!modelReferenceParsed);
+    console.log('[DEBUG] hasModelReference:', hasModelReference);
+    
+    // Parse additional reference images if provided
+    let additionalReferencesParsed = [];
+    if (effectiveAdditionalReferences && Array.isArray(effectiveAdditionalReferences) && effectiveAdditionalReferences.length > 0) {
+      console.log('[DEBUG] Processing additional reference images:', effectiveAdditionalReferences.length);
+      additionalReferencesParsed = (await Promise.all(effectiveAdditionalReferences.map(async (imageData, index) => {
+        try {
+          const parsed = await parseDataUri(imageData);
+          console.log(`[DEBUG] Additional reference image ${index + 1} parsed successfully`);
+          return parsed;
+        } catch (error) {
+          console.error(`[DEBUG] Failed to parse additional reference image ${index + 1}:`, error);
+          return null;
+        }
+      }))).filter(Boolean); // Remove any null entries
+      console.log('[DEBUG] Successfully parsed additional reference images:', additionalReferencesParsed.length);
     }
     // Validate image dimensions
     async function validateImageDimensions(originalImage, generatedImage, context) {
@@ -496,27 +737,86 @@ Deno.serve(async (req)=>{
         }; // Default fallback
       }
     }
-    // Function to parse data URI
-    function parseDataUri(dataUri) {
-      const [header, base64Data] = dataUri.split(',');
-      const mimeMatch = header.match(/data:([^;]+)/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-      return {
-        mimeType,
-        base64Data
-      };
+    // Function to parse data URI or load local/remote image into a data URI structure
+    async function parseDataUri(dataUri) {
+      // Safety check for non-string inputs
+      if (!dataUri || typeof dataUri !== 'string') {
+        console.log('[DEBUG] parseDataUri received non-string input:', typeof dataUri, dataUri);
+        return null;
+      }
+      // Data URI
+      if (dataUri.startsWith('data:')) {
+        const [header, base64Data] = dataUri.split(',');
+        const mimeMatch = header.match(/data:([^;]+)/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+        return { mimeType, base64Data };
+      }
+      // Local file path
+      if (dataUri.startsWith('/')) {
+        try {
+          const bytes = await Deno.readFile(dataUri);
+          // Guess mime type by extension
+          const lower = dataUri.toLowerCase();
+          const mimeType = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+          const base64Data = encode(bytes);
+          console.log('[DEBUG] Loaded local image path into base64:', dataUri);
+          return { mimeType, base64Data };
+        } catch (err) {
+          console.log('[DEBUG] Failed to read local image path:', dataUri, err?.message);
+          return null;
+        }
+      }
+      // Remote URL
+      if (dataUri.startsWith('http://') || dataUri.startsWith('https://')) {
+        try {
+          const res = await fetch(dataUri);
+          const buf = new Uint8Array(await res.arrayBuffer());
+          const ct = res.headers.get('content-type') || 'image/jpeg';
+          const base64Data = encode(buf);
+          console.log('[DEBUG] Fetched remote image into base64:', dataUri);
+          return { mimeType: ct, base64Data };
+        } catch (err) {
+          console.log('[DEBUG] Failed to fetch remote image:', dataUri, err?.message);
+          return null;
+        }
+      }
+      // Unsupported format
+      console.log('[DEBUG] parseDataUri unsupported string format:', dataUri.substring(0, 80));
+      return null;
     }
     // Function to build placement prompt for different awning types with variation strategies
-    function buildPlacementPrompt(awningType, variation, fabricColor, patternType, stripeRatio) {
-      // Translate Dutch awning types to descriptive English terms with specific model characteristics
+    function buildPlacementPrompt(awningType, awningModel, variation, fabricColor, patternType, stripeRatio, hasModelReference, referenceImageCount = 0) {
+      console.log(`[DEBUG] === BUILDING PLACEMENT PROMPT ===`);
+      console.log(`[DEBUG] awningType: ${awningType}`);
+      console.log(`[DEBUG] awningModel: ${awningModel}`);
+      console.log(`[DEBUG] variation: ${variation}`);
+      console.log(`[DEBUG] fabricColor: ${fabricColor}`);
+      console.log(`[DEBUG] hasModelReference: ${hasModelReference}`);
+      console.log(`[DEBUG] referenceImageCount: ${referenceImageCount}`);
+      
+      // REFACTORED: Enhanced awning descriptions with specific markiezen details
+      // Improved Gemini prompts with traditional Dutch fixed canopy awning descriptions
       const awningDescriptions = {
         "knikarm": "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING WITH HORIZONTAL EXTENDING METAL ARMS",
         "knikarmscherm": "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING WITH HORIZONTAL EXTENDING METAL ARMS",
         "uitvalarm": "MANDATORY UITVALARM VERTICAL DROP ARM AWNING",
         "uitvalscherm": "MANDATORY UITVALARM VERTICAL DROP ARM AWNING",
-        "markiezen": "MANDATORY MARKIEZEN TRADITIONAL FIXED CANOPY AWNING"
+        "markiezen": "MANDATORY MARKIEZEN TRADITIONAL FIXED CANOPY AWNING (traditional Dutch fixed canopy awning with a curved, basket-like profile, non-retractable, mounted above windows/doors)",
+        "canopy": "MANDATORY CANOPY FIXED CANOPY AWNING (modern rectangular or wedge canopy, rigid frame, non-retractable; NO cassette or folding arms)"
       };
-      const awningDescription = awningDescriptions[awningType] || awningType;
+      
+      // Override awning type to markiezen if traditional model is selected
+      let effectiveAwningType = awningType;
+      if (awningModel === "markiezen-model1" || awningType === "markiezen") {
+        effectiveAwningType = "markiezen";
+      } else if (awningModel === "canopy-model1" || awningType === "canopy") {
+        effectiveAwningType = "canopy";
+      }
+      
+      // REFACTORED: Enhanced reference image emphasis in prompts
+      const awningDescription = hasModelReference
+        ? `${awningDescriptions[effectiveAwningType] || "Awning"} THAT MATCHES THE REFERENCE MODEL EXACTLY - Match the style exactly from the reference image(s) provided`
+        : (awningDescriptions[effectiveAwningType] || "Awning");
       // Define color description
       let colorDescription = "";
       if (fabricColor && fabricColor !== "default") {
@@ -535,46 +835,298 @@ Deno.serve(async (req)=>{
       }
       // Define model-specific descriptions and hardware requirements
       let modelDescription = "";
-      if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Use modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall. Include a slim rectangular cassette mounted to the wall. Arms/frame may be dark grey or black. This is a retractable folding arm awning - NOT a fixed canopy or markiezen. IMPORTANT: Show the awning in FULLY EXTENDED position with arms completely unfolded and fabric fully deployed.${colorDescription}`;
-      } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
-        modelDescription = `Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars. IMPORTANT: Show the awning in FULLY EXTENDED position with fabric completely dropped down and arms fully extended.${colorDescription}`;
-      } else if (awningType === "markiezen") {
-        modelDescription = `Use a traditional fixed canopy: a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar. IMPORTANT: Show the canopy in its full extended form providing maximum shade coverage.${colorDescription}`;
+      if (hasModelReference) {
+        // Get the type-specific description first
+        let typeSpecificDescription = "";
+        if (awningModel === "markiezen-model1" || effectiveAwningType === "markiezen") {
+          typeSpecificDescription = "Use a traditional fixed canopy (traditional Dutch fixed canopy awning with a curved, basket-like profile, non-retractable, mounted above windows/doors): a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar.";
+        } else if (effectiveAwningType === "canopy") {
+          typeSpecificDescription = "Use a modern canopy awning: a clean rectangular or wedge-shaped fabric canopy on a rigid minimalist frame, non-retractable, mounted above windows/doors. NO folding arms, NO cassette, NO front roller. Keep the look sleek and contemporary.";
+        } else if (awningModel === "knikarm-model1" || effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+          typeSpecificDescription = "MANDATORY KNIKARM SPECIFICATIONS: Create a FULLY EXTENDED retractable folding arm awning with modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall at FULL EXTENSION. Include a slim rectangular cassette mounted to the wall. The fabric must be completely unrolled and fully deployed. Arms/frame may be dark grey or black. ABSOLUTELY NO vertical wall-mounted support arms/brackets and NO ground-support posts or poles. This is a retractable folding arm awning — NOT a fixed canopy or markiezen.";
+        } else if (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm") {
+          typeSpecificDescription = "Create a FULLY EXTENDED vertical drop arm awning with a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). The fabric must be completely lowered and fully deployed. Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.";
+        }
+
+        if (referenceImageCount > 1) {
+          modelDescription = `MULTIPLE REFERENCE MODEL MATCHING: You have ${referenceImageCount} reference images showing different views/angles of the same awning model. Study ALL reference images carefully to understand the complete awning design:
+
+REFERENCE ANALYSIS INSTRUCTIONS:
+- Examine each reference image to understand the awning's overall structure, proportions, and design details
+- Look for consistent design elements across all reference images (frame style, fabric shape, mounting method, hardware details)
+- Note any variations in viewing angle, lighting, or installation context between references
+- Synthesize the information from all references to create the most accurate representation
+- If references show different angles (front view, side view, etc.), use this to understand the 3D structure better
+- Pay attention to fabric patterns, colors, and textures that may be clearer in some references than others
+
+IMPLEMENTATION REQUIREMENTS:
+- Replicate the geometry, proportions, canopy/arm style, and hardware exactly as shown across the references
+- Match the fabric shape, mounting style, and any decorative elements visible in the references
+- Ensure the final awning looks like it belongs to the same product family as all reference images
+- Do NOT invent features not present in any of the reference images
+- Prioritize design elements that are consistently visible across multiple reference images
+
+TYPE-SPECIFIC REQUIREMENTS: ${typeSpecificDescription}${colorDescription}`;
+        } else {
+          modelDescription = `STRICT MODEL MATCHING: Use the attached awning model reference image to determine type and construction. Replicate the geometry, proportions, canopy/arm style, and any visible hardware exactly as in the reference. Do NOT invent features that are not present in the reference.
+
+TYPE-SPECIFIC REQUIREMENTS: ${typeSpecificDescription}${colorDescription}`;
+        }
+      } else if (awningModel === "markiezen-model1" || effectiveAwningType === "markiezen") {
+        modelDescription = `Use a traditional fixed canopy (traditional Dutch fixed canopy awning with a curved, basket-like profile, non-retractable, mounted above windows/doors): a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar.${colorDescription}`;
+      } else if (effectiveAwningType === "canopy") {
+        modelDescription = `Use a modern canopy awning: a clean rectangular or wedge-shaped fabric canopy on a rigid minimalist frame, non-retractable, mounted above windows/doors. NO folding arms, NO cassette, NO front roller. Keep the look sleek and contemporary.${colorDescription}`;
+      } else if (awningModel === "knikarm-model1") {
+        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Create a FULLY EXTENDED retractable folding arm awning with modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall at FULL EXTENSION. Include a slim rectangular cassette mounted to the wall. The fabric must be completely unrolled and fully deployed. Arms/frame may be dark grey or black. ABSOLUTELY NO vertical wall-mounted support arms/brackets and NO ground-support posts or poles. This is a retractable folding arm awning — NOT a fixed canopy or markiezen.${colorDescription}`;
+      } else if (effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+          modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Create a FULLY EXTENDED retractable folding arm awning with modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall at FULL EXTENSION. Include a slim rectangular cassette mounted to the wall. The fabric must be completely unrolled and fully deployed. Arms/frame may be dark grey or black. ABSOLUTELY NO vertical wall-mounted support arms/brackets and NO ground-support posts or poles. This is a retractable folding arm awning — NOT a fixed canopy or markiezen.${colorDescription}`;
+      } else if (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm") {
+        modelDescription = `Create a FULLY EXTENDED vertical drop arm awning with a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). The fabric must be completely lowered and fully deployed. In addition, add 2–3 slender vertical wall-mounted support arms/brackets placed beneath/near the awning edges. Randomize their count (2 or 3) and spacing with a symmetric look appropriate to the façade; match hardware color; ensure they are structural supports only, not operating devices. Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.${colorDescription}`;
       } else {
         modelDescription = colorDescription;
       }
       // Add negative prompting to exclude unwanted awning types
       let negativePrompting = "";
-      if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
-      } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
-        negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
-      } else if (awningType === "markiezen") {
-        negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance. STRICTLY FORBIDDEN ELEMENTS: DO NOT add any of these random mechanical parts: manual hand cranks, winding handles, pulleys, chains, ropes, extension wheels, opening mechanisms, adjustment knobs, tension devices, mechanical levers, crank handles, or any artificial opening/closing devices that are not part of the actual awning model. The awning should appear clean and modern without unnecessary mechanical elements.";
+      
+      // Get type-specific negative prompting first
+      let typeSpecificNegativePrompting = "";
+      if (effectiveAwningType === "markiezen") {
+        typeSpecificNegativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
+      } else if (effectiveAwningType === "canopy") {
+        typeSpecificNegativePrompting = "CRITICAL: Do NOT add any retractable folding arms, front roller, or wall-mounted cassette. NO heavy black metal front bar. Keep the frame minimal and clean. This must be a modern fixed canopy (rectangular or wedge).";
+      } else if (effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+        typeSpecificNegativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures, 6) NO vertical wall-mounted support arms or brackets, and NO ground-support posts/poles under the awning. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall.";
+      } else if (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm") {
+        typeSpecificNegativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade.";
       }
+
+      if (hasModelReference) {
+        if (referenceImageCount > 1) {
+          negativePrompting = `STRICT MULTI-REFERENCE CONSISTENCY: Do not create any awning type different from what is shown in ALL reference images. Study all reference images to ensure consistency - if any reference shows specific features (folding arms, cassettes, drop-arm hardware, mounting details), include them only if they appear consistently across multiple references. Do not add features visible in only one reference if they contradict the others. Do not change building elements or invent mechanical features not clearly present in the majority of reference images. Prioritize design elements that are consistently visible across all reference images. ${typeSpecificNegativePrompting}`;
+        } else {
+          negativePrompting = `STRICT TYPE CONSISTENCY: Do not create any awning type different from the reference image. Do not add folding arms, cassettes, drop-arm hardware, vertical wall-mounted support arms, or black metal front bars unless clearly visible in the reference. For knikarm specifically: IGNORE any vertical posts/poles if present in the reference and DO NOT include them. Do not change building elements or invent mechanical features not in the reference. ${typeSpecificNegativePrompting}`;
+        }
+      } else if (effectiveAwningType === "markiezen") {
+        negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
+      } else if (effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures, 6) NO vertical wall-mounted support arms or brackets, and NO ground-support posts/poles under the awning. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall.";
+      } else if (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm") {
+        negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade.";
+      }
+      // Global hardware exclusions: never render a manual crank/slingerarm
+      negativePrompting += " ADDITIONAL HARDWARE EXCLUSIONS: ABSOLUTELY DO NOT include any manual crank handle (slingerarm), winding handle, hanging rod or chain, visible wall-mounted hand crank, or any dangling operating device. Operation controls must be hidden; no external crank or rod should be visible. If the base photo contains any such manual handle/rod/chain, DIGITALLY REMOVE IT COMPLETELY from the final visualization.";
       // Add stripe-specific negative prompting if pattern is striped
       if (patternType && patternType !== "effen" && stripeRatio === "1:1") {
         negativePrompting += " STRIPE PATTERN RULES: NO duplicate colors side by side - each stripe must be a different color from its adjacent stripes. Create perfect alternating pattern with distinct colors.";
       }
-      return `CRITICAL AWNING POSITION REQUIREMENT: The awning MUST be shown in FULLY EXTENDED/OPEN position with fabric completely deployed. NEVER show retracted, closed, or partially extended awnings. DO NOT add random mechanical elements or fake extension mechanisms.
+      const intro = hasModelReference
+        ? (referenceImageCount > 1 
+           ? `DO NOT GENERATE A NEW IMAGE. THIS IS IMAGE EDITING ONLY.
+           
+           You have ${referenceImageCount + 1} images:
+           - Image 1: The ACTUAL house to edit (DO NOT CHANGE THIS HOUSE)
+           - Images 2-${referenceImageCount + 1}: Reference examples of awning styles
+           
+           Your task: EDIT image 1 by adding an awning matching the style from images 2-${referenceImageCount + 1}.
+           DO NOT create a new house. DO NOT generate a different building.
+           PRESERVE every pixel of the original house except where the awning is added.`
+           : `DO NOT GENERATE A NEW IMAGE. THIS IS IMAGE EDITING ONLY.
+           
+           You have 2 images:
+           - Image 1: The ACTUAL house to edit (DO NOT CHANGE THIS HOUSE) 
+           - Image 2: Reference example of awning style
+           
+           Your task: EDIT image 1 by adding an awning matching image 2's style.
+           DO NOT create a new house. DO NOT generate a different building.
+           PRESERVE every pixel of the original house except where the awning is added.`)
+        : `DO NOT GENERATE A NEW IMAGE. THIS IS IMAGE EDITING ONLY.
+        
+        Using the provided house image, ADD an awning to it.
+        DO NOT create a new house. DO NOT generate a different building.
+        PRESERVE every pixel of the original house except where the awning is added.
+        
+        You are adding a ${awningDescription} to THIS SPECIFIC HOUSE.`;
 
-Using the provided image, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. 
+      // Only include wall-arm generation policy for non-markiezen types
+      const wallArmPolicy = (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm")
+        ? `
+WALL ARM GENERATION POLICY (UITVALARM ONLY):
+- Follow the reference model; if it includes vertical wall arms, replicate their style.
+- If arms are not clearly visible in the reference, you may ADD 2–3 slender vertical WALL-MOUNTED support arms/brackets near the awning edges (never reaching the ground).
+- Randomize count (2 or 3) and spacing while keeping symmetry and architectural plausibility.
+- Arms must be simple straight bars with discreet brackets, matching the hardware color.
+- These arms are structural supports ONLY; never render any manual crank handle, chain, or hanging rod.`
+        : `
+KNIKARM ARM POLICY:
+- Use ONLY a wall-mounted cassette and TWO horizontal articulated folding arms.
+- DO NOT include any vertical wall arms, support brackets to the ground, posts, or poles.`;
 
-${modelDescription} 
+      const finalPrompt = `${intro}
 
-MANDATORY EXTENDED POSITION: Show the awning fabric completely unrolled and providing maximum shade coverage. The fabric should be taut and fully deployed from the mounting point. DO NOT show any retracted or rolled-up fabric. DO NOT add artificial extension mechanisms that don't belong to the actual awning model.
+CRITICAL RULES:
+1. This is the house you MUST edit: [First image provided]
+2. DO NOT generate any new house or building
+3. Add ONLY the awning to the existing house
+4. Keep EVERYTHING else exactly the same:
+   - Same brick color and texture
+   - Same windows and frames
+   - Same doors
+   - Same roof
+   - Same ground/patio
+   - Same sky and lighting
 
-CRITICAL ANGLE REQUIREMENTS: The awning fabric MUST have a proper diagonal downward slope from the wall mounting point to the front edge. The fabric should be clearly visible and angled downward at approximately 10-15 degrees from horizontal to create realistic shade coverage. The fabric surface should be clearly visible from the viewing angle, not appearing flat or too horizontal. Ensure the awning projects outward with a natural downward slope that shows the fabric texture and creates proper shadow underneath.
+${modelDescription}
 
-The awning should look professionally installed and architecturally appropriate. Variation strategy: ${variation}. ${negativePrompting}`;
-    }
-    // Function to build evaluation prompt
-    function buildEvaluationPrompt(awningType) {
-      if (awningType === "markiezen") {
-        return `Evaluate this house image with markiezen awning placement. Respond ONLY with JSON:\n{\n  "placement_quality": number,\n  "visual_realism": number,\n  "red_line_removed": boolean,\n  "technical_quality": number,\n  "overall_score": number,\n  "has_knikarm_arms": boolean,\n  "has_front_roller_or_cassette": boolean,\n  "has_black_metal_front_bar": boolean,\n  "is_fixed_canopy_shape": boolean,\n  "has_side_cheeks": boolean,\n  "has_fabric_valance": boolean,\n  "issues": "description"\n}`;
+AWNING REQUIREMENTS:
+- Type: ${effectiveAwningType}
+- Must be fully extended and visible
+- Must provide shade over window/door area
+${colorDescription}
+${wallArmPolicy}
+
+${negativePrompting}
+
+OUTPUT: The same house image with only an awning added.
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide any analysis or feedback about the generation process, format it as JSON:
+{
+  "generation_status": "success|partial|failed",
+  "awning_type_generated": "${effectiveAwningType}",
+  "placement_confidence": number (1-10),
+  "size_adequacy": number (1-10),
+  "style_consistency": number (1-10),
+  "notes": "any specific observations or adjustments made",
+  "warnings": "any potential issues or limitations"
+}`;
+
+      console.log(`[DEBUG] === FINAL PLACEMENT PROMPT ===`);
+      console.log(`[DEBUG] Prompt length: ${finalPrompt.length}`);
+      console.log(`[DEBUG] Prompt preview: ${finalPrompt.substring(0, 200)}...`);
+      
+      // MARKIEZEN SPECIFIC PROMPT LOGGING
+      if (effectiveAwningType === 'markiezen') {
+        console.log('=== MARKIEZEN PROMPT DEBUG ===');
+        console.log('Full prompt for markiezen:');
+        console.log(finalPrompt);
+        console.log('==============================');
       }
-      return `Evaluate this house image with ${awningType} awning placement. Rate 1-10 for: placement quality, visual realism, red line removal, technical quality. Return JSON: {"placement_quality": number, "visual_realism": number, "red_line_removed": boolean, "technical_quality": number, "overall_score": number, "issues": "description"}`;
+      
+      return finalPrompt;
+    }
+    // REFACTORED: Enhanced evaluation prompt with awning type validation and fidelity metrics
+    function buildEvaluationPrompt(awningType, hasModelReference = false) {
+      const fidelityMetrics = `
+  "image_fidelity_score": number (1-10, how well the background/house features are preserved),
+  "background_preservation": boolean (true if house features unchanged),
+  "brick_color_preserved": boolean,
+  "window_style_preserved": boolean,
+  "door_preserved": boolean (if applicable),
+  "roof_preserved": boolean,
+  "ground_surface_preserved": boolean,
+  "lighting_preserved": boolean,
+  "sky_preserved": boolean,
+  "architectural_details_preserved": boolean,
+  "image_dimensions_preserved": boolean,
+  "generation_vs_editing": "editing|generation" (was this proper editing or new generation?),
+  "fidelity_issues": "string describing any background changes detected"`;
+
+      if (awningType === "canopy") {
+        return `Evaluate this house image with CANOPY awning placement.${hasModelReference ? " You will ALSO receive a reference image of the model." : ""}
+
+🔍 CRITICAL FIDELITY EVALUATION: This should be IMAGE EDITING, not image generation. Check if the background/house features remain identical to the original.
+
+Respond ONLY with JSON:
+{
+  "placement_quality": number,
+  "visual_realism": number,
+  "red_line_removed": boolean,
+  "technical_quality": number,
+  "overall_score": number,
+  "is_correct_awning_type": boolean,
+  "awning_type_detected": "string (e.g., 'canopy', 'knikarm')",
+  "is_canopy_shape": boolean,
+  "has_sleek_minimal_frame": boolean,
+  "has_knikarm_arms": boolean,
+  "has_front_roller_or_cassette": boolean,
+  "matches_reference_model": ${hasModelReference ? 'boolean' : 'false'},
+  "has_manual_crank_handle": boolean,
+  "has_vertical_wall_arms": boolean,
+  "wall_arms_count": number,${fidelityMetrics},
+  "issues": "description"
+}`;
+      }
+
+      if (awningType === "markiezen") {
+        if (hasModelReference) {
+          return `Evaluate this house image with MARKIEZEN awning placement. You will ALSO receive a reference image of the model. 
+
+🔍 CRITICAL FIDELITY EVALUATION: This should be IMAGE EDITING, not image generation. Check if the background/house features remain identical to the original.
+
+Compare the generated awning against the reference and respond ONLY with JSON:
+{
+  "placement_quality": number,
+  "visual_realism": number,
+  "red_line_removed": boolean,
+  "technical_quality": number,
+  "overall_score": number,
+  "is_correct_awning_type": boolean,
+  "awning_type_detected": "string (e.g., 'markiezen', 'knikarm')",
+  "has_knikarm_arms": boolean,
+  "has_front_roller_or_cassette": boolean,
+  "has_black_metal_front_bar": boolean,
+  "is_fixed_canopy_shape": boolean,
+  "has_side_cheeks": boolean,
+  "has_fabric_valance": boolean,
+  "matches_reference_model": boolean,
+  "has_manual_crank_handle": boolean,
+  "has_vertical_wall_arms": boolean,
+  "wall_arms_count": number,${fidelityMetrics},
+  "issues": "description"
+}`;
+        }
+        return `Evaluate this house image with MARKIEZEN awning placement. 
+
+🔍 CRITICAL FIDELITY EVALUATION: This should be IMAGE EDITING, not image generation. Check if the background/house features remain identical to the original.
+
+Respond ONLY with JSON:
+{
+  "placement_quality": number,
+  "visual_realism": number,
+  "red_line_removed": boolean,
+  "technical_quality": number,
+  "overall_score": number,
+  "is_correct_awning_type": boolean,
+  "awning_type_detected": "string (e.g., 'markiezen', 'knikarm')",
+  "has_knikarm_arms": boolean,
+  "has_front_roller_or_cassette": boolean,
+  "has_black_metal_front_bar": boolean,
+  "is_fixed_canopy_shape": boolean,
+  "has_side_cheeks": boolean,
+  "has_fabric_valance": boolean,
+  "has_manual_crank_handle": boolean,
+  "has_vertical_wall_arms": boolean,
+  "wall_arms_count": number,${fidelityMetrics},
+  "issues": "description"
+}`;
+      }
+      return `Evaluate this house image with ${awningType} awning placement. 
+
+🔍 CRITICAL FIDELITY EVALUATION: This should be IMAGE EDITING, not image generation. Check if the background/house features remain identical to the original.
+
+Rate 1-10 for: placement quality, visual realism, red line removal, technical quality. Return ONLY JSON: 
+{
+  "placement_quality": number, 
+  "visual_realism": number, 
+  "red_line_removed": boolean, 
+  "technical_quality": number, 
+  "overall_score": number, 
+  "is_correct_awning_type": boolean, 
+  "awning_type_detected": "string", 
+  "has_manual_crank_handle": boolean, 
+  "has_vertical_wall_arms": boolean, 
+  "wall_arms_count": number,${fidelityMetrics}, 
+  "issues": "description"
+}`;
     }
     // Function to compute placement score with type-specific criteria
     function computePlacementScore(evaluation, awningType) {
@@ -609,7 +1161,31 @@ The awning should look professionally installed and architecturally appropriate.
         if (evaluation.is_fixed_canopy_shape === true) score += 20;
         if (evaluation.has_side_cheeks === true) score += 10;
         if (evaluation.has_fabric_valance === true) score += 10;
+        if (typeof evaluation.matches_reference_model === 'boolean') {
+          if (evaluation.matches_reference_model === true) score += 20; else score -= 20;
+        }
       }
+      // Global hardware penalty: manual crank/handle must never appear
+      if (evaluation.has_manual_crank_handle === true) {
+        score -= 50;
+      }
+      // Wall-arm scoring: reward only for uitvalarm; penalize for knikarm
+      if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
+        if (evaluation.has_vertical_wall_arms === true) {
+          const count = typeof evaluation.wall_arms_count === 'number' ? evaluation.wall_arms_count : 0;
+          score += 10 + Math.min(Math.max(count, 0), 3) * 5; // bonus 10 + up to 15
+        }
+      } else if (awningType === "knikarm" || awningType === "knikarmscherm") {
+        if (evaluation.has_vertical_wall_arms === true) {
+          score -= 30; // explicit penalty: knikarm must be cantilevered without vertical wall arms
+        }
+      }
+      
+      // REFACTORED: Add awning type validation penalty
+      if (evaluation.is_correct_awning_type === false) {
+        score -= 50;
+      }
+      
       // Prevent negative scores
       score = Math.max(0, score);
       return maxScore > 0 ? Math.round(score / maxScore * 100) : 0;
@@ -697,6 +1273,57 @@ The awning should look professionally installed and architecturally appropriate.
           score += 50;
         }
       }
+      // REFACTORED: Add awning type validation penalty
+      if (evaluation.is_correct_awning_type === false) {
+        score -= 50;
+        issues.push(`Incorrect awning type detected: ${evaluation.awning_type_detected || 'unknown'}`);
+      }
+      
+      // FIDELITY PENALTIES: Moderate penalties for poor image editing fidelity
+      if (typeof evaluation.image_fidelity_score === 'number') {
+        if (evaluation.image_fidelity_score < 7) {
+          score -= 25; // Significant penalty for poor fidelity
+          issues.push(`Low image fidelity score: ${evaluation.image_fidelity_score}/10`);
+        } else if (evaluation.image_fidelity_score < 8) {
+          score -= 15; // Moderate penalty
+          issues.push(`Moderate fidelity issues: ${evaluation.image_fidelity_score}/10`);
+        }
+      }
+      
+      if (evaluation.background_preservation === false) {
+        score -= 30; // Significant penalty for background changes
+        issues.push('Background/house features were altered');
+      }
+      
+      if (evaluation.generation_vs_editing === 'generation') {
+        score -= 35; // Major penalty for generation instead of editing
+        issues.push('Image generation detected instead of editing');
+      }
+      
+      // Individual preservation penalties (reduced to avoid total elimination)
+      const preservationChecks = [
+        { key: 'brick_color_preserved', penalty: 8, label: 'brick color' },
+        { key: 'window_style_preserved', penalty: 10, label: 'window style' },
+        { key: 'door_preserved', penalty: 6, label: 'door' },
+        { key: 'roof_preserved', penalty: 12, label: 'roof' },
+        { key: 'ground_surface_preserved', penalty: 6, label: 'ground surface' },
+        { key: 'lighting_preserved', penalty: 8, label: 'lighting' },
+        { key: 'sky_preserved', penalty: 5, label: 'sky' },
+        { key: 'architectural_details_preserved', penalty: 12, label: 'architectural details' },
+        { key: 'image_dimensions_preserved', penalty: 20, label: 'image dimensions' }
+      ];
+      
+      for (const check of preservationChecks) {
+        if (evaluation[check.key] === false) {
+          score -= check.penalty;
+          issues.push(`${check.label} not preserved`);
+        }
+      }
+      
+      if (evaluation.fidelity_issues && evaluation.fidelity_issues.trim() !== '') {
+        issues.push(`Fidelity issues: ${evaluation.fidelity_issues}`);
+      }
+      
       // Ensure non-negative score
       score = Math.max(0, score);
       return {
@@ -705,22 +1332,42 @@ The awning should look professionally installed and architecturally appropriate.
       };
     }
     // Function to generate placement version
-    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey) {
+    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey, referenceImages = []) {
+      console.log(`[DEBUG] === GEMINI API CALL START: ${label} ===`);
+      console.log(`[DEBUG] API Key available: ${!!geminiApiKey}`);
+      console.log(`[DEBUG] Image data length: ${imageBase64 ? imageBase64.length : 'null'}`);
+      console.log(`[DEBUG] Reference images count: ${referenceImages.length}`);
+      console.log(`[DEBUG] Prompt preview: ${prompt.substring(0, 200)}...`);
+      
       const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent";
+      // Construct parts: base image, optional reference images, then prompt
+      const parts: any[] = [
+        {
+          inlineData: {
+            mimeType: "image/png",
+            data: imageBase64
+          }
+        }
+      ];
+      for (const ref of referenceImages) {
+        if (ref && ref.base64Data) {
+          console.log(`[DEBUG] Adding reference image with mime type: ${ref.mimeType || "image/png"}`);
+          parts.push({
+            inlineData: {
+              mimeType: ref.mimeType || "image/png",
+              data: ref.base64Data
+            }
+          });
+        }
+      }
+      parts.push({ text: prompt });
+      
+      console.log(`[DEBUG] Total parts in request: ${parts.length}`);
+      
       const requestBody = {
         contents: [
           {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: imageBase64
-                }
-              },
-              {
-                text: prompt
-              }
-            ]
+            parts
           }
         ],
         generationConfig: {
@@ -736,6 +1383,14 @@ The awning should look professionally installed and architecturally appropriate.
           }
         }
       };
+      
+      // REFACTORED: Enhanced debug logging for prompts and responses
+      console.log(`[DEBUG] === FULL PROMPT SENT TO GEMINI ===`);
+      console.log(prompt);
+      console.log(`[DEBUG] === END PROMPT ===`);
+      console.log(`[DEBUG] Making API call to: ${GEMINI_IMAGE_URL}`);
+      console.log(`[DEBUG] Request body size: ${JSON.stringify(requestBody).length} characters`);
+      
       const response = await fetch(`${GEMINI_IMAGE_URL}?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: {
@@ -743,10 +1398,21 @@ The awning should look professionally installed and architecturally appropriate.
         },
         body: JSON.stringify(requestBody)
       });
+      
+      console.log(`[DEBUG] API Response status: ${response.status}`);
+      console.log(`[DEBUG] API Response headers:`, Object.fromEntries(response.headers.entries()));
+      
       if (!response.ok) {
-        throw new Error(`Generation API error: ${response.status}`);
+        const errorText = await response.text();
+        console.error(`[DEBUG] API Error response body: ${errorText}`);
+        throw new Error(`Generation API error: ${response.status} - ${errorText}`);
       }
       const result = await response.json();
+      
+      // REFACTORED: Log Gemini's raw response
+      console.log(`[DEBUG] === GEMINI RAW RESPONSE ===`);
+      console.log(JSON.stringify(result, null, 2));
+      console.log(`[DEBUG] === END RAW RESPONSE ===`);
       // Extract image data
       let base64Data = null;
       if (result.candidates && result.candidates[0]) {
@@ -764,36 +1430,136 @@ The awning should look professionally installed and architecturally appropriate.
           }
         }
       }
+      
+      // Parse any JSON feedback from Gemini
+      let generationFeedback = null;
+      if (result.candidates && result.candidates[0]) {
+        const candidate = result.candidates[0];
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.text) {
+              try {
+                const jsonMatch = part.text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  generationFeedback = JSON.parse(jsonMatch[0]);
+                  console.log(`[DEBUG] Gemini generation feedback:`, generationFeedback);
+                  break;
+                }
+              } catch (e) {
+                console.log(`[DEBUG] Failed to parse generation feedback JSON:`, e.message);
+              }
+            }
+          }
+        }
+      }
+      
       return {
         base64Data,
-        label
+        label,
+        generationFeedback
       };
     }
-    // Function to evaluate placement
-    async function evaluatePlacement(evaluationPrompt, imageBase64, geminiApiKey) {
+
+    // Function to validate if the image was edited vs generated
+    async function validateIfEdited(originalImageBase64, generatedImageBase64, geminiApiKey) {
+      console.log(`[DEBUG] === VALIDATION CHECK: EDITED VS GENERATED ===`);
+      
       const GEMINI_TEXT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+      
+      const checkPrompt = `Compare these two images carefully.
+      
+      Are they the SAME house/building with only an awning added?
+      Or are they completely different houses/buildings?
+      
+      Look specifically at:
+      - Brick color and texture
+      - Window style and frames
+      - Door style and color
+      - Roof design
+      - Ground/patio layout
+      - Overall building architecture
+      
+      Respond with JSON only:
+      {
+        "same_house": boolean,
+        "confidence": number (1-10),
+        "explanation": "brief explanation of what you observed"
+      }`;
+
+      const parts = [
+        { text: checkPrompt },
+        { inlineData: { mimeType: "image/png", data: originalImageBase64 } },
+        { inlineData: { mimeType: "image/png", data: generatedImageBase64 } }
+      ];
+
       const requestBody = {
-        contents: [
-          {
-            parts: [
-              {
-                text: evaluationPrompt
-              },
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: imageBase64
-                }
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          topK: 16,
-          topP: 0.8,
-          maxOutputTokens: 2048
+        contents: [{ parts }],
+        generationConfig: { 
+          temperature: 0.1, 
+          topK: 16, 
+          topP: 0.8, 
+          maxOutputTokens: 1024 
         }
+      };
+
+      try {
+        const response = await fetch(`${GEMINI_TEXT_URL}?key=${geminiApiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          console.error(`[DEBUG] Validation API error: ${response.status}`);
+          return { same_house: true, confidence: 5, explanation: "Validation failed, assuming edited" };
+        }
+
+        const result = await response.json();
+        
+        if (result.candidates && result.candidates[0] && result.candidates[0].content && result.candidates[0].content.parts) {
+          const textPart = result.candidates[0].content.parts.find(part => part.text);
+          if (textPart) {
+            try {
+              const jsonMatch = textPart.text.match(/\{[\s\S]*\}/);
+              if (jsonMatch) {
+                const validation = JSON.parse(jsonMatch[0]);
+                console.log(`[DEBUG] Validation result:`, validation);
+                return validation;
+              }
+            } catch (e) {
+              console.error(`[DEBUG] Failed to parse validation JSON:`, e.message);
+            }
+          }
+        }
+        
+        return { same_house: true, confidence: 5, explanation: "Could not parse validation response" };
+      } catch (error) {
+        console.error(`[DEBUG] Validation error:`, error);
+        return { same_house: true, confidence: 5, explanation: "Validation error occurred" };
+      }
+    }
+
+    // REFACTORED: Enhanced evaluation function with debug logging
+    async function evaluatePlacement(evaluationPrompt, imageBase64, geminiApiKey, referenceInlineData = null) {
+      const GEMINI_TEXT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+      
+      // REFACTORED: Log evaluation prompt
+      console.log(`[DEBUG] === EVALUATION PROMPT SENT TO GEMINI ===`);
+      console.log(evaluationPrompt);
+      console.log(`[DEBUG] === END EVALUATION PROMPT ===`);
+      
+      const parts = [
+        { text: evaluationPrompt },
+        { inlineData: { mimeType: "image/png", data: imageBase64 } }
+      ];
+      if (referenceInlineData && referenceInlineData.data) {
+        parts.push({ inlineData: { mimeType: referenceInlineData.mimeType || "image/png", data: referenceInlineData.data } });
+      }
+      const requestBody = {
+        contents: [ { parts } ],
+        generationConfig: { temperature: 0.1, topK: 16, topP: 0.8, maxOutputTokens: 2048 }
       };
       const response = await fetch(`${GEMINI_TEXT_URL}?key=${GEMINI_API_KEY}`, {
         method: 'POST',
@@ -806,6 +1572,11 @@ The awning should look professionally installed and architecturally appropriate.
         throw new Error(`Evaluation API error: ${response.status}`);
       }
       const result = await response.json();
+      
+      // REFACTORED: Log evaluation response
+      console.log(`[DEBUG] === EVALUATION RAW RESPONSE ===`);
+      console.log(JSON.stringify(result, null, 2));
+      console.log(`[DEBUG] === END EVALUATION RESPONSE ===`);
       // Extract and parse evaluation
       let evaluation = null;
       if (result.candidates && result.candidates[0]) {
@@ -828,26 +1599,40 @@ The awning should look professionally installed and architecturally appropriate.
       }
       return evaluation;
     }
-    // Parse the input image
-    const parsed = parseDataUri(image_data);
-    const imageBase64 = parsed.base64Data;
-    // Generate placement variations with early stopping and iterative improvement
-    const evaluationPrompt = buildEvaluationPrompt(new_awning_type);
+    
+    // REFACTORED: Simplified placement variations (3 max) and capped total iterations (5 max)
+    const evaluationPrompt = buildEvaluationPrompt(effectiveAwningType, hasModelReference);
     console.log(`[DEBUG] Starting placement generation phase...`);
     const variations = [];
     const colorIterations = []; // Initialize colorIterations at proper scope
-    const maxVariations = 5;
+    const maxVariations = 3; // REDUCED from 5 to 3
     const initialVariations = 2;
-    const scoreThreshold = 75; // Score threshold to proceed to color editing
+    const scoreThreshold = 70; // Slightly lowered threshold for faster completion
     let currentBaseImage = imageBase64; // Track the best image for iterative improvement
     let bestScore = 0;
     let bestVariationIndex = -1;
+    let bestVariation = null;
     // Phase 1: Generate initial 2 variations
     console.log(`[DEBUG] Phase 1: Generating initial ${initialVariations} variations...`);
     for(let i = 0; i < initialVariations; i++){
       try {
         console.log(`[DEBUG] Generating placement variation ${i + 1}/${initialVariations}...`);
-        const variation = await generatePlacementVersion(buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio), currentBaseImage, `Placement ${i + 1}`, GEMINI_API_KEY);
+        // Combine primary and additional reference images
+        const allReferenceImages = [];
+        if (hasModelReference && modelReferenceParsed) {
+          allReferenceImages.push(modelReferenceParsed);
+        }
+        if (additionalReferencesParsed.length > 0) {
+          allReferenceImages.push(...additionalReferencesParsed);
+        }
+        
+        const variation = await generatePlacementVersion(
+          buildPlacementPrompt(effectiveAwningType, new_awning_model, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio, hasModelReference || additionalReferencesParsed.length > 0, allReferenceImages.length),
+          imageBase64,
+          `Placement ${i + 1}`,
+          GEMINI_API_KEY,
+          allReferenceImages
+        );
         if (variation.base64Data) {
           // Validate image dimensions
           const validation = await validateImageDimensions(imageBase64, variation.base64Data, `placement variation ${i + 1}`);
@@ -855,11 +1640,100 @@ The awning should look professionally installed and architecturally appropriate.
             variation.base64Data = validation.correctedImage;
             console.log(`[DEBUG] Applied dimension correction to placement variation ${i + 1}`);
           }
+          
+          // Validate if the image was edited vs generated
+          const originalBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+          const generatedBase64 = variation.base64Data.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+          const editValidation = await validateIfEdited(originalBase64, generatedBase64, GEMINI_API_KEY);
+          
+          if (!editValidation.same_house && editValidation.confidence > 6) {
+            console.log(`[WARNING] === GENERATION DETECTED INSTEAD OF EDITING ===`);
+            console.log(`[WARNING] Variation ${i + 1}: ${editValidation.explanation}`);
+            console.log(`[WARNING] Confidence: ${editValidation.confidence}/10`);
+            console.log(`[WARNING] This suggests the model generated a new house instead of editing the original`);
+            console.log(`[WARNING] ================================================`);
+            
+            // Add a flag to the variation to indicate this issue
+            variation.generationDetected = true;
+            variation.validationResult = editValidation;
+          } else {
+            console.log(`[DEBUG] Validation passed: Same house detected (confidence: ${editValidation.confidence}/10)`);
+            variation.generationDetected = false;
+            variation.validationResult = editValidation;
+          }
           // Evaluate the placement
           const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
           const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
-          const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
-          const score = computePlacementScore(evaluation, new_awning_type);
+          // Use the first reference image for evaluation (primary reference)
+          const primaryReference = allReferenceImages.length > 0 ? allReferenceImages[0] : null;
+          const evaluation = await evaluatePlacement(
+            evaluationPrompt,
+            evalBase64Data,
+            GEMINI_API_KEY,
+            primaryReference ? { mimeType: primaryReference.mimeType, data: primaryReference.base64Data } : null
+          );
+          
+          // MARKIEZEN EVALUATION DEBUG LOGGING
+          if (effectiveAwningType === 'markiezen') {
+            console.log('=== MARKIEZEN EVALUATION DEBUG ===');
+            console.log('Evaluation result:', JSON.stringify(evaluation, null, 2));
+            console.log('==================================');
+          }
+          
+          // FIDELITY DEBUG LOGGING - Compare input vs output characteristics
+          if (evaluation) {
+            console.log('=== IMAGE FIDELITY ANALYSIS ===');
+            console.log(`Variation ${i + 1} - ${variation.label}`);
+            console.log('Input Image: Original house photo');
+            console.log('Output Analysis:');
+            
+            // Core fidelity metrics
+            if (typeof evaluation.image_fidelity_score === 'number') {
+              console.log(`  📊 Image Fidelity Score: ${evaluation.image_fidelity_score}/10`);
+              if (evaluation.image_fidelity_score < 7) {
+                console.log('  🚨 CRITICAL: Low fidelity detected - major background changes likely');
+              } else if (evaluation.image_fidelity_score < 8) {
+                console.log('  ⚠️  WARNING: Moderate fidelity issues detected');
+              } else {
+                console.log('  ✅ Good fidelity score');
+              }
+            }
+            
+            // Background preservation analysis
+            if (typeof evaluation.background_preservation === 'boolean') {
+              console.log(`  🏠 Background Preserved: ${evaluation.background_preservation ? '✅ YES' : '❌ NO'}`);
+              if (!evaluation.background_preservation) {
+                console.log('  🚨 CRITICAL: Background elements were modified or regenerated');
+              }
+            }
+            
+            // Generation vs editing detection
+            if (evaluation.generation_vs_editing) {
+              console.log(`  🎨 Process Type: ${evaluation.generation_vs_editing}`);
+              if (evaluation.generation_vs_editing === 'generation') {
+                console.log('  🚨 CRITICAL: Gemini performed generation instead of editing');
+              } else {
+                console.log('  ✅ Proper editing behavior detected');
+              }
+            }
+            
+            // Detailed element preservation
+            const preservedElements = evaluation.preserved_elements || {};
+            console.log('  🔍 Element Preservation Analysis:');
+            Object.entries(preservedElements).forEach(([element, preserved]) => {
+              const status = preserved ? '✅' : '❌';
+              console.log(`    ${element}: ${status} ${preserved ? 'PRESERVED' : 'CHANGED'}`);
+            });
+            
+            // Fidelity issues summary
+            if (evaluation.fidelity_issues && evaluation.fidelity_issues.trim()) {
+              console.log(`  ⚠️  Fidelity Issues: ${evaluation.fidelity_issues}`);
+            }
+            
+            console.log('================================');
+          }
+          
+          const score = computePlacementScore(evaluation, effectiveAwningType);
           variations.push({
             label: variation.label,
             base64: variation.base64Data,
@@ -912,9 +1786,64 @@ The awning should look professionally installed and architecturally appropriate.
         try {
           console.log(`[DEBUG] Generating placement variation ${i + 1}/${maxVariations} (iterative improvement)...`);
           // Use improved prompt for iterative refinement
-          const basePrompt = buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio);
-          const iterativePrompt = `${basePrompt}\n\nIMPORTANT: This is an iterative improvement. The current image already has an awning, but it needs refinement. Focus on:\n- Improving the awning's positioning and proportions\n- Enhancing the structural realism and mounting details\n- Better integration with the building architecture\n- Correcting any placement or scaling issues from the previous iteration`;
-          const variation = await generatePlacementVersion(iterativePrompt, currentBaseImage, `Placement ${i + 1} (Refined)`, GEMINI_API_KEY);
+          // Combine primary and additional reference images for iterative improvement
+          const allReferenceImages = [];
+          if (hasModelReference && modelReferenceParsed) {
+            allReferenceImages.push(modelReferenceParsed);
+          }
+          if (additionalReferencesParsed.length > 0) {
+            allReferenceImages.push(...additionalReferencesParsed);
+          }
+          
+          // Check if previous best variation had fidelity issues
+          bestVariation = variations.find(v => v.evalScore === bestScore);
+          const hasFidelityIssues = bestVariation && bestVariation.evalParsed && (
+            bestVariation.evalParsed.image_fidelity_score < 7 ||
+            bestVariation.evalParsed.background_preservation === false ||
+            bestVariation.evalParsed.generation_vs_editing === 'generation'
+          );
+          
+          let iterativePrompt;
+          if (hasFidelityIssues) {
+            console.log(`[DEBUG] Fidelity issues detected in best variation. Using enhanced inpainting prompt.`);
+            // Use enhanced inpainting prompt for fidelity issues
+            iterativePrompt = `🚨 CRITICAL FIDELITY RECOVERY MODE 🚨
+
+You are performing PRECISE IMAGE EDITING, not image generation. The previous attempt had fidelity issues.
+
+🔴 MANDATORY INPAINTING RULES:
+- ONLY edit the area marked by the red line
+- PRESERVE every single pixel outside the red line area
+- DO NOT change house color, texture, windows, doors, roof, or any background elements
+- DO NOT generate a new image - EDIT the existing one
+- The red line is your EDIT MASK - add awning there, then remove the red line
+
+🏠 PRESERVATION CHECKLIST (CRITICAL):
+✅ Keep exact same brick/wall color and texture
+✅ Keep exact same window frames and glass
+✅ Keep exact same door style and color
+✅ Keep exact same roof and gutters
+✅ Keep exact same ground/patio surface
+✅ Keep exact same lighting and shadows
+✅ Keep exact same sky and background
+✅ Keep exact same image dimensions
+
+${buildPlacementPrompt(effectiveAwningType, new_awning_model, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio, hasModelReference || additionalReferencesParsed.length > 0, allReferenceImages.length)}
+
+FIDELITY VERIFICATION: After adding the awning, verify that ONLY the awning area has changed and everything else remains pixel-perfect identical to the input.`;
+          } else {
+            // Standard iterative improvement prompt
+            const basePrompt = buildPlacementPrompt(effectiveAwningType, new_awning_model, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio, hasModelReference || additionalReferencesParsed.length > 0, allReferenceImages.length);
+            iterativePrompt = `${basePrompt}\n\nIMPORTANT: This is an iterative improvement. The current image already has an awning, but it needs refinement. Focus on:\n- Improving the awning's positioning and proportions\n- Enhancing the structural realism and mounting details\n- Better integration with the building architecture\n- Correcting any placement or scaling issues from the previous iteration`;
+          }
+          
+          const variation = await generatePlacementVersion(
+            iterativePrompt,
+            imageBase64,
+            `Placement ${i + 1} (Refined)`,
+            GEMINI_API_KEY,
+            allReferenceImages
+          );
           if (variation.base64Data) {
             // Validate image dimensions
             const validation = await validateImageDimensions(imageBase64, variation.base64Data, `refined placement variation ${i + 1}`);
@@ -922,11 +1851,77 @@ The awning should look professionally installed and architecturally appropriate.
               variation.base64Data = validation.correctedImage;
               console.log(`[DEBUG] Applied dimension correction to refined placement variation ${i + 1}`);
             }
+            
+            // Validate if the image was edited vs generated (iterative)
+            const originalBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+            const generatedBase64 = variation.base64Data.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+            const editValidation = await validateIfEdited(originalBase64, generatedBase64, GEMINI_API_KEY);
+            
+            if (!editValidation.same_house && editValidation.confidence > 6) {
+              console.log(`[WARNING] === GENERATION DETECTED IN ITERATIVE REFINEMENT ===`);
+              console.log(`[WARNING] Refined Variation ${i + 1}: ${editValidation.explanation}`);
+              console.log(`[WARNING] Confidence: ${editValidation.confidence}/10`);
+              console.log(`[WARNING] This suggests the model generated a new house instead of refining the original`);
+              console.log(`[WARNING] ========================================================`);
+              
+              // Add a flag to the variation to indicate this issue
+              variation.generationDetected = true;
+              variation.validationResult = editValidation;
+            } else {
+              console.log(`[DEBUG] Iterative validation passed: Same house detected (confidence: ${editValidation.confidence}/10)`);
+              variation.generationDetected = false;
+              variation.validationResult = editValidation;
+            }
             // Evaluate the placement
             const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
             const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
-            const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
-            const score = computePlacementScore(evaluation, new_awning_type);
+            // Use the first reference image for evaluation (primary reference)
+            const primaryReference = allReferenceImages.length > 0 ? allReferenceImages[0] : null;
+            const evaluation = await evaluatePlacement(
+              evaluationPrompt,
+              evalBase64Data,
+              GEMINI_API_KEY,
+              primaryReference ? { mimeType: primaryReference.mimeType, data: primaryReference.base64Data } : null
+            );
+            
+            // MARKIEZEN EVALUATION DEBUG LOGGING (iterative)
+            if (effectiveAwningType === 'markiezen') {
+              console.log('=== MARKIEZEN ITERATIVE EVALUATION DEBUG ===');
+              console.log('Evaluation result:', JSON.stringify(evaluation, null, 2));
+              console.log('============================================');
+            }
+            
+            // ITERATIVE FIDELITY DEBUG LOGGING - Track fidelity during refinement
+            if (evaluation) {
+              console.log('=== ITERATIVE FIDELITY ANALYSIS ===');
+              console.log(`Refined Variation ${i + 1} - ${variation.label}`);
+              console.log(`Prompt Type: ${hasFidelityIssues ? 'FIDELITY RECOVERY MODE' : 'Standard Iterative'}`);
+              
+              // Core fidelity metrics comparison
+              if (typeof evaluation.image_fidelity_score === 'number') {
+                console.log(`  📊 Refined Fidelity Score: ${evaluation.image_fidelity_score}/10`);
+                if (hasFidelityIssues) {
+                  console.log(`  🔄 Recovery Attempt: ${evaluation.image_fidelity_score >= 7 ? 'SUCCESS' : 'STILL NEEDS WORK'}`);
+                }
+              }
+              
+              // Background preservation in refinement
+              if (typeof evaluation.background_preservation === 'boolean') {
+                console.log(`  🏠 Background Still Preserved: ${evaluation.background_preservation ? '✅ YES' : '❌ NO'}`);
+              }
+              
+              // Check if refinement fixed generation vs editing
+              if (evaluation.generation_vs_editing) {
+                console.log(`  🎨 Refined Process Type: ${evaluation.generation_vs_editing}`);
+                if (hasFidelityIssues && evaluation.generation_vs_editing === 'editing') {
+                  console.log('  ✅ SUCCESS: Recovery mode fixed generation behavior');
+                }
+              }
+              
+              console.log('===================================');
+            }
+            
+            const score = computePlacementScore(evaluation, effectiveAwningType);
             variations.push({
               label: variation.label,
               base64: variation.base64Data,
@@ -976,9 +1971,16 @@ The awning should look professionally installed and architecturally appropriate.
       }
     }
     // Find the best placement
-    const validVariations = variations.filter((v)=>v.base64 && v.evalScore > 0);
+    let validVariations = variations.filter((v)=>v.base64 && v.evalScore > 0);
+    
+    // Fallback: if no positive scores due to fidelity penalties, use any variation with an image
     if (validVariations.length === 0) {
-      throw new Error("No valid placement variations generated");
+      console.log('[DEBUG] No positive scores found, using fallback to any variation with image');
+      validVariations = variations.filter((v)=>v.base64);
+      
+      if (validVariations.length === 0) {
+        throw new Error("No valid placement variations generated");
+      }
     }
     const best = validVariations.reduce((a, b)=>a.evalScore > b.evalScore ? a : b);
     bestScore = best.evalScore;
@@ -1012,13 +2014,73 @@ The awning should look professionally installed and architecturally appropriate.
           if (currentColorIteration === 1) {
             // First iteration: comprehensive color application
             if (finalPatternType === 'solid') {
-            colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.`;
+            colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the color application, format it as JSON:
+{
+  "color_application_status": "success|partial|failed",
+  "color_accuracy": number (1-10),
+  "pattern_consistency": number (1-10),
+  "fabric_visibility": number (1-10),
+  "notes": "specific observations about color/pattern application",
+  "adjustments_made": "description of any corrections applied"
+}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the color application, format it as JSON:
+{
+  "color_application_status": "success|partial|failed",
+  "color_accuracy": number (1-10),
+  "pattern_consistency": number (1-10),
+  "fabric_visibility": number (1-10),
+  "notes": "specific observations about color/pattern application",
+  "adjustments_made": "description of any corrections applied"
+}`;
           } else {
             if (finalStripeRatio === '1:1') {
-              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.`;
+              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the pattern application, format it as JSON:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": number (1-10),
+  "stripe_consistency": number (1-10),
+  "color_alternation": number (1-10),
+  "notes": "specific observations about pattern application",
+  "stripe_issues": "any problems with stripe width or color alternation"
+}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the stripe application, format it as JSON:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": number (1-10),
+  "stripe_consistency": number (1-10),
+  "color_alternation": number (1-10),
+  "notes": "specific observations about stripe application",
+  "stripe_issues": "any problems with stripe width or color alternation"
+}`;
             } else {
-              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create consistent pattern across entire fabric surface, maintaining stripe proportions.`;
-            }
+                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Ensure pattern consistency across all fabric panels. ${swatchReference}
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the pattern application, format it as JSON:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": number (1-10),
+  "stripe_ratio_accuracy": number (1-10),
+  "pattern_consistency": number (1-10),
+  "notes": "specific observations about pattern application",
+  "ratio_issues": "any problems with stripe ratio proportions"
+}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. CRITICAL: Keep the awning in fully extended/open position with proper diagonal downward slope. The fabric must be clearly visible and angled downward from the wall mounting point. DO NOT add random mechanical elements or fake extension mechanisms. Create consistent pattern across entire fabric surface, maintaining stripe proportions.
+
+RESPONSE FORMAT: Generate the image as requested, and if you need to provide feedback about the stripe application, format it as JSON:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": number (1-10),
+  "stripe_ratio_accuracy": number (1-10),
+  "pattern_consistency": number (1-10),
+  "notes": "specific observations about stripe application",
+  "ratio_issues": "any problems with stripe ratio proportions"
+}`;
+              }
           }
           } else {
             // Second iteration: refinement and correction
@@ -1119,6 +2181,29 @@ The awning should look professionally installed and architecturally appropriate.
               }
             }
           }
+          
+          // Parse any JSON feedback from Gemini about color application
+          let colorApplicationFeedback = null;
+          if (colorEditResult.candidates && colorEditResult.candidates[0]) {
+            const candidate = colorEditResult.candidates[0];
+            if (candidate.content && candidate.content.parts) {
+              for (const part of candidate.content.parts) {
+                if (part.text) {
+                  try {
+                    const jsonMatch = part.text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                      colorApplicationFeedback = JSON.parse(jsonMatch[0]);
+                      console.log(`[DEBUG] Gemini color application feedback:`, colorApplicationFeedback);
+                      break;
+                    }
+                  } catch (e) {
+                    console.log(`[DEBUG] Failed to parse color application feedback JSON:`, e.message);
+                  }
+                }
+              }
+            }
+          }
+          
           if (!editedColorImageData) {
             editedColorImageData = currentColorImageData; // Use current as fallback
           } else {
@@ -1129,7 +2214,7 @@ The awning should look professionally installed and architecturally appropriate.
               console.log(`[DEBUG] Applied dimension correction to color iteration ${currentColorIteration}`);
             }
           }
-          // Evaluate the color-edited image
+          // REFACTORED: Enhanced color evaluation prompt with awning type validation
           const colorEvaluationPrompt = `Evaluate awning fabric for ${new_fabric_color} ${finalPatternType}. Check that ONLY the fabric textile material was changed and ALL structural/building elements were preserved. Respond ONLY with JSON:
 {
   "is_uniform_base_color": boolean,
@@ -1151,6 +2236,8 @@ The awning should look professionally installed and architecturally appropriate.
   "has_structural_lines": boolean,
   "stripe_accuracy": 0.8,
   "pattern_consistency": boolean,
+  "is_correct_awning_type": boolean,
+  "awning_type_detected": "string (e.g., 'markiezen', 'knikarm')",
   "goal_met": boolean
 }`;
           const colorEvalBase64Match = editedColorImageData.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
@@ -1249,7 +2336,8 @@ The awning should look professionally installed and architecturally appropriate.
             goalMet: colorEvaluation.goal_met,
             evaluation: colorEvaluation,
             issues: colorIssues,
-            imageData: editedColorImageData
+            imageData: editedColorImageData,
+            applicationFeedback: colorApplicationFeedback
           });
           // Update best if this iteration improved
           if (colorScore > bestColorScore) {
@@ -1280,7 +2368,8 @@ The awning should look professionally installed and architecturally appropriate.
             issues: [
               error.message
             ],
-            imageData: null
+            imageData: null,
+            applicationFeedback: null
           });
           currentColorIteration++;
         }
@@ -1312,27 +2401,61 @@ The awning should look professionally installed and architecturally appropriate.
     console.log(`[DEBUG] - Final score: ${finalScore}`);
     // Send completion notification email
     let completionEmailSent = false;
-    console.log('DEBUG: Checking completion email conditions:');
-    console.log('- send_notifications:', send_notifications);
+    console.log('DEBUG: Checking completion email conditions (auto on price request):');
+    console.log('- include_price_indication:', include_price_indication);
     console.log('- customer_email:', customer_email);
     console.log('- gmailService:', !!gmailService);
     console.log('- processedImage:', !!processedImage);
-    if (send_notifications && customer_email && gmailService && processedImage) {
+    console.log('- shouldSendEmails:', shouldSendEmails);
+    if (shouldSendEmails && processedImage) {
       console.log('DEBUG: All conditions met, attempting to send completion email...');
+      console.log('DEBUG: Customer email:', customer_email);
+      console.log('DEBUG: Customer name:', customer_name);
+      console.log('DEBUG: Awning type:', new_awning_type);
+      console.log('DEBUG: Goal achieved:', overallGoalAchieved);
+      console.log('DEBUG: Final score:', finalScore);
+      console.log('DEBUG: Price data available:', !!priceData);
+      
       try {
+        console.log('DEBUG: Starting completion notification send...');
         await gmailService.sendCompletionNotification(customer_email, customer_name, new_awning_type, processedImage, overallGoalAchieved, finalScore, priceData);
         completionEmailSent = true;
-        console.log('Completion notification email sent successfully');
+        console.log('SUCCESS: Completion notification email sent successfully');
       } catch (error) {
-        console.error('Failed to send completion notification email:', error);
-        console.error('Error details:', error.message);
+        console.error('FAILED: Completion notification email failed:', error);
+        console.error('Error name:', error.name);
+        console.error('Error message:', error.message);
         console.error('Error stack:', error.stack);
+        
+        // Try to send a simple notification without image as fallback
+        try {
+          console.log('DEBUG: Attempting fallback email without image...');
+          await gmailService.sendCompletionNotification(customer_email, customer_name, new_awning_type, null, overallGoalAchieved, finalScore, priceData);
+          completionEmailSent = true;
+          console.log('SUCCESS: Fallback completion email sent without image');
+        } catch (fallbackError) {
+          console.error('FAILED: Even fallback email failed:', fallbackError);
+        }
+      }
+    } else if (shouldSendEmails) {
+      // No processed image available; still send a completion email without image
+      try {
+        console.log('DEBUG: Sending completion email without image (no processedImage)...');
+        await gmailService.sendCompletionNotification(customer_email, customer_name, new_awning_type, null, overallGoalAchieved, finalScore, priceData);
+        completionEmailSent = true;
+        console.log('SUCCESS: Completion email sent without image');
+      } catch (error) {
+        console.error('FAILED: Completion email without image failed:', error);
       }
     } else {
       console.log('DEBUG: Completion email not sent - conditions not met');
     }
-    // Prepare debug object
+    // REFACTORED: Enhanced debug object with effective_awning_type and prompt_used
     const debugInfo = {
+      effective_awning_type: effectiveAwningType,
+      original_awning_type: new_awning_type,
+      awning_model: new_awning_model,
+      prompt_used: bestVariation ? bestVariation.label : 'none',
       placementVariations: variations.map((v)=>({
           label: v.label,
           score: v.evalScore,
@@ -1383,6 +2506,11 @@ The awning should look professionally installed and architecturally appropriate.
         'Content-Type': 'application/json'
       }
     });
+    } // End of executeMainProcessing function
+    
+    // Execute main processing logic
+    return await executeMainProcessing();
+    
   } catch (error) {
     console.error('Edge function error:', error);
     console.error('Error stack:', error.stack);

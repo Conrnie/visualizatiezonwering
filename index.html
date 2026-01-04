@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Awning Placement Visualization</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="config.js"></script>
+    <link rel="stylesheet" href="styles.css?v=2.4">
+    <script src="config.js?v=2.4"></script>
 </head>
 <body>
     <div class="container">
@@ -25,7 +25,9 @@
                         <select id="product-type" name="product-type">
                             <option value="">Select a product type</option>
                             <option value="knikarm">Retractable Awning</option>
-                            <option value="markiezen">Dutch Canopy</option>
+                            <option value="markiezen">Traditional Awning</option>
+                            <option value="canopy">Canopy Awning</option>
+                            <option value="uitvalscherm">Drop Arm Awning</option>
                         </select>
                     </div>
                     
@@ -91,12 +93,12 @@
                         
                         <div class="price-indication-fields" id="price-indication-fields" style="display: none;">
                             <div class="form-group">
-                                <label for="width">Width (cm):</label>
-                                <input type="number" id="width" name="width" min="100" max="500" placeholder="e.g. 300">
+                                <label for="width">Width (ft):</label>
+                                <input type="number" id="width" name="width" min="3" max="17" step="0.5" placeholder="e.g. 10">
                             </div>
                             <div class="form-group">
-                                <label for="projection">Projection (cm):</label>
-                                <input type="number" id="projection" name="projection" min="50" max="300" placeholder="e.g. 200">
+                                <label for="projection">Projection (ft):</label>
+                                <input type="number" id="projection" name="projection" min="2" max="10" step="0.5" placeholder="e.g. 6.5">
                             </div>
                             <div class="form-group">
                                 <label for="verdieping">Floor:</label>
@@ -119,6 +121,8 @@
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Email notifications removed; Edge function emails are auto-sent for price requests -->
                     
                     <!-- Generate Button -->
                     <div class="form-group">
@@ -155,6 +159,7 @@
 
     <!-- Image Modal removed - results are only delivered via email -->
     
-    <script src="script.js"></script>
+    <script>console.log('🔥 INDEX.HTML LOADED');</script>
+    <script src="script_v3.js?v=2.4"></script>
 </body>
 </html>

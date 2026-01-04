@@ -1,313 +1,11 @@
 import { decode, encode } from "https://deno.land/std@0.208.0/encoding/base64.ts";
 import { Image } from "https://deno.land/x/imagescript@1.2.15/mod.ts";
-const GMAIL_CLIENT_ID = Deno.env.get('GMAIL_CLIENT_ID');
-const GMAIL_CLIENT_SECRET = Deno.env.get('GMAIL_CLIENT_SECRET');
-const GMAIL_REFRESH_TOKEN = Deno.env.get('GMAIL_REFRESH_TOKEN');
-const GMAIL_SENDER_EMAIL = Deno.env.get('GMAIL_SENDER_EMAIL');
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
-class GmailAPIService {
-  constructor(clientId, clientSecret, refreshToken, senderEmail){
-    this.clientId = clientId;
-    this.clientSecret = clientSecret;
-    this.refreshToken = refreshToken;
-    this.senderEmail = senderEmail;
-    this.accessToken = null;
-    this.tokenExpiry = null;
-  }
-  async getAccessToken() {
-    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
-      return this.accessToken;
-    }
-    const response = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-        refresh_token: this.refreshToken,
-        grant_type: 'refresh_token'
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(`Failed to get access token: ${data.error_description}`);
-    }
-    this.accessToken = data.access_token;
-    this.tokenExpiry = Date.now() + data.expires_in * 1000 - 60000; // 1-minute buffer
-    return this.accessToken;
-  }
-  async sendEmail(to, subject, htmlContent, attachments = []) {
-    const accessToken = await this.getAccessToken();
-    const boundary = `boundary_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    let email = [
-      `From: ${this.senderEmail}`,
-      `To: ${to}`,
-      `Subject: ${subject}`,
-      `MIME-Version: 1.0`,
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      `Content-Type: text/html; charset=UTF-8`,
-      '',
-      htmlContent,
-      ''
-    ];
-    attachments.forEach((attachment)=>{
-      email.push(`--${boundary}`);
-      email.push(`Content-Type: ${attachment.mimeType}; name="${attachment.filename}"`);
-      if (attachment.contentId) {
-        email.push(`Content-Disposition: inline; filename="${attachment.filename}"`);
-        email.push(`Content-ID: <${attachment.contentId}>`);
-      } else {
-        email.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
-      }
-      email.push(`Content-Transfer-Encoding: base64`);
-      email.push('');
-      email.push(attachment.base64Data);
-      email.push('');
-    });
-    email.push(`--${boundary}--`);
-    let rawEmail;
-    try {
-      rawEmail = encode(email.join('\r\n'));
-    } catch (error) {
-      console.error('Failed to encode email content:', error);
-      console.error('Email subject:', subject);
-      throw new Error('Email content encoding failed');
-    }
-    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        raw: rawEmail
-      })
-    });
-    const result = await response.json();
-    if (!response.ok) {
-      throw new Error(`Gmail API error: ${result.error.message}`);
-    }
-    return result;
-  }
-  async sendStartNotification(customerEmail, customerName) {
-    const subject = 'Uw Zonnescherm Visualisatie wordt Gemaakt';
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
-        <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hallo ${customerName || 'daar'}!</h2>
-          
-          <p style="color: #555; line-height: 1.6;">Bedankt voor uw aanvraag! We zijn nu bezig met het maken van uw persoonlijke zonnescherm visualisatie en prijsindicatie.</p>
-          
-          <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-            <h3 style="color: #2c3e50; margin-top: 0;">⏳ Wat gebeurt er nu?</h3>
-            <ul style="color: #555; line-height: 1.8;">
-              <li>Onze AI analyseert uw woningfoto</li>
-              <li>We plaatsen het zonnescherm op de beste locatie</li>
-              <li>We berekenen uw persoonlijke prijsindicatie</li>
-              <li>U ontvangt binnen enkele minuten het resultaat</li>
-            </ul>
-          </div>
-          
-          <div style="text-align: center; margin: 20px 0;">
-            <div style="background: #28a745; color: white; padding: 15px; border-radius: 8px; display: inline-block;">
-              <strong>🔄 Bezig met verwerken...</strong>
-            </div>
-          </div>
-          
-          <p style="color: #666; font-size: 14px; text-align: center;">Dit proces duurt meestal 2-5 minuten.</p>
-        </div>
-      </div>
-    `;
-    return await this.sendEmail(customerEmail, subject, htmlContent);
-  }
-  async sendCompletionNotification(customerEmail, customerName, awningType, processedImage, goalAchieved, score, priceData = null) {
-    const subject = goalAchieved ? 'Uw Zonnescherm Visualisatie is Klaar!' : 'Uw Zonnescherm Visualisatie - Resultaat Beschikbaar';
-    const priceSection = priceData ? `
-      <div style="background: #d4edda; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #28a745;">
-        <h3 style="color: #2c3e50; margin-top: 0;">💰 Prijsindicatie</h3>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Basisprijs zonnescherm:</span>
-          <span style="font-weight: bold;">€${priceData.basePrice.toFixed(2)}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Installatie (${priceData.floor}):</span>
-          <span style="font-weight: bold;">€${priceData.installationCost.toFixed(2)}</span>
-        </div>
-        ${priceData.colorSurcharge > 0 ? `
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-          <span style="color: #555;">Kleur toeslag:</span>
-          <span style="font-weight: bold;">€${priceData.colorSurcharge.toFixed(2)}</span>
-        </div>
-        ` : ''}
-        <hr style="border: none; border-top: 1px solid #ccc; margin: 15px 0;">
-        <div style="display: flex; justify-content: space-between; font-size: 18px;">
-          <span style="color: #2c3e50; font-weight: bold;">Totaalprijs (incl. BTW):</span>
-          <span style="color: #e74c3c; font-weight: bold; font-size: 20px;">€${priceData.totalPrice.toFixed(2)}</span>
-        </div>
-      </div>
-      
-      <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107;">
-        <p style="color: #856404; margin: 0; font-size: 14px;">
-          <strong>⚠️ Let op:</strong> Dit is een indicatieve prijs. De definitieve prijs kan afwijken na een persoonlijke meting en adviesgesprek.
-        </p>
-      </div>
-    ` : '';
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #f8f9fa; padding: 20px;">
-        <div style="background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          <h2 style="color: #2c3e50; margin-bottom: 20px;">Hallo ${customerName || 'daar'}!</h2>
-          
-          <p style="color: #555; line-height: 1.6;">Uw zonnescherm visualisatie is voltooid! Hieronder vindt u het resultaat${priceData ? ' inclusief prijsindicatie' : ''}:</p>
-          
-          <div style="text-align: center; margin: 20px 0;">
-            <h3 style="color: #2c3e50;">🏠 Uw Zonnescherm Visualisatie</h3>
-            <img src="cid:visualization" style="max-width: 100%; height: auto; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);" alt="Zonnescherm visualisatie">
-            <p style="color: #666; font-size: 12px; margin-top: 10px;">Zo zou uw nieuwe ${awningType} zonnescherm er uit kunnen zien</p>
-          </div>
-          
-          ${priceData ? `
-          <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #3498db;">
-            <h3 style="color: #2c3e50; margin-top: 0;">📋 Specificaties</h3>
-            <ul style="color: #555; line-height: 1.8;">
-              <li><strong>Type zonnescherm:</strong> ${priceData.awningType}</li>
-              <li><strong>Afmetingen:</strong> ${priceData.width}cm breed × ${priceData.projection}cm uitval</li>
-              <li><strong>Oppervlakte:</strong> ${priceData.area} m²</li>
-              <li><strong>Verdieping:</strong> ${priceData.floor}</li>
-              <li><strong>Kleur:</strong> ${priceData.fabricColor || 'Standaard'}</li>
-            </ul>
-          </div>
-          ` : ''}
-          
-          ${priceSection}
-          
-          <div style="text-align: center; margin-top: 30px;">
-            <p style="color: #555; margin-bottom: 15px;">Interesse in deze visualisatie${priceData ? ' en prijsindicatie' : ''}?</p>
-            <a href="tel:+31123456789" style="background: #3498db; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">📞 Bel ons</a>
-            <a href="mailto:info@voorbeeld.nl" style="background: #28a745; color: white; padding: 12px 25px; text-decoration: none; border-radius: 5px; display: inline-block; margin: 5px;">✉️ E-mail ons</a>
-          </div>
-          
-          <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 12px;">
-            <p>Deze visualisatie${priceData ? ' en prijsindicatie' : ''} is 30 dagen geldig vanaf ${new Date().toLocaleDateString('nl-NL')}.</p>
-            <p>Bedankt voor uw vertrouwen in onze dienstverlening!</p>
-          </div>
-        </div>
-      </div>
-    `;
-    // Prepare attachments
-    const attachments = [];
-    if (processedImage) {
-      // Extract base64 data from data URI
-      const base64Match = processedImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
-      const base64Data = base64Match ? base64Match[1] : processedImage;
-      attachments.push({
-        filename: 'zonnescherm_visualisatie.jpg',
-        mimeType: 'image/jpeg',
-        base64Data: base64Data,
-        contentId: 'visualization'
-      });
-    }
-    return await this.sendEmail(customerEmail, subject, htmlContent, attachments);
-  }
-}
-// Price calculation logic
-class PriceCalculator {
-  constructor(){
-    // Base prices per m² for different awning types (in euros)
-    this.basePrices = {
-      'knikarm': 85,
-      'knikarmscherm': 85,
-      'uitvalarm': 75,
-      'uitvalscherm': 75,
-      'markiezen': 95
-    };
-    // Installation costs based on floor level
-    this.installationCosts = {
-      'begane-grond': 150,
-      'eerste-verdieping': 200,
-      'tweede-verdieping': 275,
-      'derde-verdieping': 350,
-      'hoger': 450
-    };
-    // Color surcharges for special colors/patterns
-    this.colorSurcharges = {
-      'lichtgrijs-wit-gestreept': 15,
-      'gebroken-wit-creme-gestreept': 15,
-      'loodgrijs-effen': 0,
-      'oranje': 25,
-      'default': 0
-    };
-    // BTW rate
-    this.vatRate = 0.21;
-  }
-  calculatePrice(awningType, width, projection, floor, fabricColor = 'default') {
-    // Convert cm to meters and calculate area
-    const widthM = width / 100;
-    const projectionM = projection / 100;
-    const area = widthM * projectionM;
-    // Get base price per m²
-    const basePricePerM2 = this.basePrices[awningType] || this.basePrices['knikarm'];
-    const basePrice = area * basePricePerM2;
-    // Get installation cost
-    const installationCost = this.installationCosts[floor] || this.installationCosts['begane-grond'];
-    // Get color surcharge
-    const colorSurcharge = (this.colorSurcharges[fabricColor] || 0) * area;
-    // Calculate subtotal
-    const subtotal = basePrice + installationCost + colorSurcharge;
-    // Add VAT
-    const totalPrice = subtotal * (1 + this.vatRate);
-    return {
-      area: area.toFixed(2),
-      basePrice,
-      installationCost,
-      colorSurcharge,
-      subtotal,
-      totalPrice,
-      vatAmount: totalPrice - subtotal
-    };
-  }
-  getFloorDisplayName(floor) {
-    const floorNames = {
-      'begane-grond': 'Begane grond',
-      'eerste-verdieping': 'Eerste verdieping',
-      'tweede-verdieping': 'Tweede verdieping',
-      'derde-verdieping': 'Derde verdieping',
-      'hoger': 'Hoger dan 3e verdieping'
-    };
-    return floorNames[floor] || floor;
-  }
-  getAwningDisplayName(awningType) {
-    const awningNames = {
-      'knikarm': 'Knikarm Zonnescherm',
-      'knikarmscherm': 'Knikarm Zonnescherm',
-      'uitvalarm': 'Uitvalarm Zonnescherm',
-      'uitvalscherm': 'Uitvalarm Zonnescherm',
-      'markiezen': 'Markiezen'
-    };
-    return awningNames[awningType] || awningType;
-  }
-}
-// Initialize Gmail service
-let gmailService = null;
-console.log('DEBUG: Gmail environment variables check:');
-console.log('- GMAIL_CLIENT_ID:', !!GMAIL_CLIENT_ID);
-console.log('- GMAIL_CLIENT_SECRET:', !!GMAIL_CLIENT_SECRET);
-console.log('- GMAIL_REFRESH_TOKEN:', !!GMAIL_REFRESH_TOKEN);
-console.log('- GMAIL_SENDER_EMAIL:', !!GMAIL_SENDER_EMAIL);
-if (GMAIL_CLIENT_ID && GMAIL_CLIENT_SECRET && GMAIL_REFRESH_TOKEN && GMAIL_SENDER_EMAIL) {
-  try {
-    gmailService = new GmailAPIService(GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, GMAIL_SENDER_EMAIL);
-    console.log('Gmail service initialized successfully');
-  } catch (error) {
-    console.error('Failed to initialize Gmail service:', error);
-    console.error('Initialization error details:', error.message);
-  }
-} else {
-  console.log('Gmail environment variables not set - email notifications disabled');
-}
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
 // CORS headers
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -336,25 +34,61 @@ Deno.serve(async (req)=>{
     console.log('Processing request...');
     // Parse request body
     const body = await req.json();
-    const { image_data, new_awning_type, new_fabric_color, pattern_type, stripe_ratio, color_swatch_image, customer_email, customer_name, send_notifications, width, projection, verdieping, include_price_indication = false } = body;
+    console.log('DEBUG: Full request body:', JSON.stringify(body).substring(0, 500) + '...');
+    
+    let { image_data, new_awning_type, new_fabric_color, stripe_ratio, color_swatch_image, new_awning_reference_image, customer_email, customer_name, send_notifications } = body;
+    const recordId = body.record_id;
+    let record = null;
+
+    // Handle database-triggered payload
+    if (recordId && body.image) {
+      console.log(`DEBUG: Detected database trigger payload for record ${recordId}`);
+      image_data = body.image;
+      
+      // Initialize Supabase client for fetching details
+      const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+      
+      // Fetch record details
+      const { data: fetchedRecord, error: fetchError } = await supabase
+        .from('visualizations')
+        .select('*')
+        .eq('id', recordId)
+        .single();
+        
+      if (fetchError) {
+        console.error('DEBUG: Failed to fetch record:', fetchError);
+      } else if (fetchedRecord) {
+        record = fetchedRecord;
+        console.log('DEBUG: Fetched record details:', JSON.stringify(record).substring(0, 200));
+        // Check configuration first, then legacy fields/metadata
+        const config = record.configuration || {};
+        const meta = record.metadata || {};
+        
+        new_awning_type = config.model || config.awning_type || record.awning_type || record.type || meta.awning_type || meta.type;
+        new_fabric_color = config.color || config.fabric_color || record.fabric_color || record.color || meta.fabric_color || meta.color;
+        // stripe_ratio removed as per user request
+        color_swatch_image = config.color_swatch_image || record.color_swatch_image || record.swatch_image || meta.color_swatch_image;
+        // Try to find the model reference image in various possible locations
+        new_awning_reference_image = config.model_image || config.new_awning_reference_image || record.new_awning_reference_image || meta.new_awning_reference_image || meta.model_image;
+        
+        customer_email = config.customer_email || record.customer_email || record.email || meta.customer_email;
+        customer_name = config.customer_name || record.customer_name || record.name || meta.customer_name;
+      }
+    }
+
     console.log('Debug - Extracted request parameters:');
-    console.log('- image_data:', !!image_data);
+    console.log('- image_data (present):', !!image_data);
+    console.log('- record_id:', recordId);
     console.log('- new_awning_type:', new_awning_type);
     console.log('- new_fabric_color:', new_fabric_color);
-    console.log('- pattern_type:', pattern_type);
-    console.log('- stripe_ratio:', stripe_ratio);
-    console.log('- color_swatch_image:', !!color_swatch_image);
-    console.log('- customer_email:', customer_email);
-    console.log('- customer_name:', customer_name);
-    console.log('- send_notifications:', send_notifications);
-    console.log('- width:', width);
-    console.log('- projection:', projection);
-    console.log('- verdieping:', verdieping);
-    console.log('- include_price_indication:', include_price_indication);
+    // console.log('- stripe_ratio:', stripe_ratio); // Removed
+    console.log('- color_swatch_image (present):', !!color_swatch_image);
+    console.log('- new_awning_reference_image (present):', !!new_awning_reference_image);
+    
     // Validate required parameters
-    if (!image_data || !new_awning_type) {
+    if (!image_data) {
       return new Response(JSON.stringify({
-        error: 'Missing required parameters: image_data, new_awning_type'
+        error: 'Missing required parameters: image_data'
       }), {
         status: 400,
         headers: {
@@ -363,61 +97,29 @@ Deno.serve(async (req)=>{
         }
       });
     }
+
+    // Default awning type if missing (User feedback: "New awning type is the model image I assume?")
+    if (!new_awning_type) {
+        console.log('DEBUG: new_awning_type is undefined. Attempting to infer or default.');
+        
+        if (new_awning_reference_image) {
+            console.log('DEBUG: Model reference image found. Using generic type to allow model-driven generation.');
+            new_awning_type = 'custom awning matching the reference model';
+        } else {
+            console.log('DEBUG: Defaulting new_awning_type to "knikarmscherm"');
+            new_awning_type = 'knikarmscherm';
+        }
+    }
+
+    if (!new_fabric_color) {
+         console.log('DEBUG: new_fabric_color is undefined. Defaulting to "grey".');
+         new_fabric_color = 'grey';
+    }
     // Initialize price calculator and calculate price if requested
-    let priceData = null;
-    if (include_price_indication && width && projection && verdieping) {
-      console.log('Calculating price indication...');
-      // Validate dimensions
-      if (width < 100 || width > 800 || projection < 50 || projection > 400) {
-        return new Response(JSON.stringify({
-          error: 'Invalid dimensions. Width must be 100-800cm, projection must be 50-400cm'
-        }), {
-          status: 400,
-          headers: {
-            ...corsHeaders,
-            'Content-Type': 'application/json'
-          }
-        });
-      }
-      const calculator = new PriceCalculator();
-      const priceCalculation = calculator.calculatePrice(new_awning_type, width, projection, verdieping, new_fabric_color);
-      priceData = {
-        awningType: calculator.getAwningDisplayName(new_awning_type),
-        width,
-        projection,
-        area: priceCalculation.area,
-        floor: calculator.getFloorDisplayName(verdieping),
-        fabricColor: new_fabric_color,
-        basePrice: priceCalculation.basePrice,
-        installationCost: priceCalculation.installationCost,
-        colorSurcharge: priceCalculation.colorSurcharge,
-        subtotal: priceCalculation.subtotal,
-        vatAmount: priceCalculation.vatAmount,
-        totalPrice: priceCalculation.totalPrice,
-        calculatedAt: new Date().toISOString()
-      };
-      console.log('Price calculation completed:', priceData);
-    }
+    // Price logic removed
+
     // Send start notification email
-    let startEmailSent = false;
-    console.log('DEBUG: Checking start email conditions:');
-    console.log('- send_notifications:', send_notifications);
-    console.log('- customer_email:', customer_email);
-    console.log('- gmailService:', !!gmailService);
-    if (send_notifications && customer_email && gmailService) {
-      console.log('DEBUG: All conditions met, attempting to send start email...');
-      try {
-        await gmailService.sendStartNotification(customer_email, customer_name);
-        startEmailSent = true;
-        console.log('Start notification email sent successfully');
-      } catch (error) {
-        console.error('Failed to send start notification email:', error);
-        console.error('Error details:', error.message);
-        console.error('Error stack:', error.stack);
-      }
-    } else {
-      console.log('DEBUG: Start email not sent - conditions not met');
-    }
+    // Email logic removed
     // Validate image dimensions
     async function validateImageDimensions(originalImage, generatedImage, context) {
       try {
@@ -506,8 +208,7 @@ Deno.serve(async (req)=>{
       };
     }
     // Function to build placement prompt for different awning types with variation strategies
-    function buildPlacementPrompt(awningType, variation, fabricColor, patternType, stripeRatio) {
-      // Translate Dutch awning types to descriptive English terms with specific model characteristics
+    function buildPlacementPrompt(awningType, variation, fabricColor, patternType, hasModelImage = false) {
       const awningDescriptions = {
         "knikarm": "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING WITH HORIZONTAL EXTENDING METAL ARMS",
         "knikarmscherm": "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING WITH HORIZONTAL EXTENDING METAL ARMS",
@@ -516,58 +217,43 @@ Deno.serve(async (req)=>{
         "markiezen": "MANDATORY MARKIEZEN TRADITIONAL FIXED CANOPY AWNING"
       };
       const awningDescription = awningDescriptions[awningType] || awningType;
-      // Define color description
       let colorDescription = "";
       if (fabricColor && fabricColor !== "default") {
         colorDescription = ` The fabric must be ${fabricColor}`;
         if (patternType && patternType !== "effen") {
           colorDescription += ` with ${patternType} pattern`;
-          if (stripeRatio) {
-            if (stripeRatio === "1:1") {
-              colorDescription += ` with EQUAL WIDTH STRIPES - each stripe must be exactly the same width as the adjacent stripe, creating perfectly balanced alternating bands of equal size`;
-            } else {
-              colorDescription += ` in ${stripeRatio} ratio`;
-            }
-          }
         }
         colorDescription += ".";
       }
-      // Define model-specific descriptions and hardware requirements
       let modelDescription = "";
+      let imageReferenceInstruction = hasModelImage
+        ? "The first image is the target house. The second image is an awning reference. Edit ONLY the first image. Do not generate a new house or background."
+        : "Using the provided house image, edit it directly. Do not generate a new image or change any non-awning elements.";
+      
       if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Use modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall. Include a slim rectangular cassette mounted to the wall. Arms/frame may be dark grey or black. ABSOLUTELY NO vertical wall-mounted support arms/brackets and NO ground-support posts or poles. This is a retractable folding arm awning - NOT a fixed canopy or markiezen.${colorDescription}`;
+        modelDescription = `MANDATORY KNIKARM SPECIFICATIONS: Use modern metal folding arms that extend horizontally from a wall-mounted cassette. The arms must be clearly visible, articulated (with joints), and extend outward from the wall. Include a slim rectangular cassette mounted to the wall. Arms/frame may be dark grey or black. This is a retractable folding arm awning - NOT a fixed canopy or markiezen.${colorDescription}`;
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
         modelDescription = `Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.${colorDescription}`;
       } else if (awningType === "markiezen") {
         modelDescription = `Use a traditional fixed canopy: a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar.${colorDescription}`;
       } else {
-        modelDescription = colorDescription;
+        if (hasModelImage) {
+             imageReferenceInstruction = "The first image is the target house. The second image is an awning reference. Edit ONLY the first image. Do not generate a new house or background.";
+             modelDescription = `MANDATORY: Add an awning to the house in the first image that looks EXACTLY like the awning in the second image (reference). Copy the style, shape, mechanics, and hardware details from the reference image exactly. Do NOT copy the background or house from the reference image.${colorDescription}`;
+        } else {
+             modelDescription = colorDescription;
+        }
       }
-      // Add negative prompting to exclude unwanted awning types
       let negativePrompting = "";
       if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures, 6) NO vertical wall-mounted support arms/brackets and NO ground-support posts/poles under the awning. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall.";
+        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances - this is NOT a knikarm, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO horizontal cassette awnings without folding arms, 4) NO half-markiezen or semi-fixed canopies, 5) NO wedge-shaped or curved canopy structures. MANDATORY: ONLY create a retractable folding arm awning (knikarm) with horizontal extending metal arms that fold out from a wall-mounted cassette. The arms must be clearly visible and extend horizontally outward from the wall.";
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
         negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward. ONLY create a vertical drop arm awning that hangs down from the wall like a window shade.";
       } else if (awningType === "markiezen") {
         negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
       }
-      // Add stripe-specific negative prompting if pattern is striped
-      if (patternType && patternType !== "effen" && stripeRatio === "1:1") {
-        negativePrompting += " STRIPE PATTERN RULES: NO duplicate colors side by side - each stripe must be a different color from its adjacent stripes. Create perfect alternating pattern with distinct colors.";
-      }
-      return `Using the provided image, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. ${modelDescription} The awning should look professionally installed and architecturally appropriate. Variation strategy: ${variation}. ${negativePrompting}
-
-IMPORTANT: If you have any analysis or feedback about the generation process, format it as a JSON object with these fields:
-{
-  "generation_status": "success|partial|failed",
-  "awning_type_generated": "string describing the type created",
-  "placement_confidence": 0.0-1.0,
-  "size_adequacy": "appropriate|too_small|too_large",
-  "style_consistency": "matches|partially_matches|conflicts",
-  "notes": "any observations about the generation",
-  "warnings": "any issues or concerns"
-}`;
+      
+      return `${imageReferenceInstruction}, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. ${modelDescription} The awning should look professionally installed and architecturally appropriate. Variation strategy: ${variation}. ${negativePrompting} CRITICAL: Edit ONLY the first image. Do not change the house, background, perspective, lighting, or any non-awning elements.`;
     }
     // Function to build evaluation prompt
     function buildEvaluationPrompt(awningType) {
@@ -612,6 +298,7 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
       }
       // Prevent negative scores
       score = Math.max(0, score);
+      score = Math.min(100, score);
       return maxScore > 0 ? Math.round(score / maxScore * 100) : 0;
     }
     // Function to calculate color iteration score
@@ -705,35 +392,47 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
       };
     }
     // Function to generate placement version
-    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey) {
-      const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent";
+    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey, modelReferenceImage = null) {
+      const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent";
+      
+      const parts = [
+        {
+          inlineData: {
+            mimeType: "image/png",
+            data: imageBase64
+          }
+        }
+      ];
+
+      if (modelReferenceImage) {
+        const modelBase64Match = modelReferenceImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
+        const modelBase64Data = modelBase64Match ? modelBase64Match[1] : modelReferenceImage;
+        parts.push({
+          inlineData: {
+            mimeType: "image/png",
+            data: modelBase64Data
+          }
+        });
+      }
+
+      parts.push({
+        text: prompt
+      });
+
       const requestBody = {
         contents: [
           {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: imageBase64
-                }
-              },
-              {
-                text: prompt
-              }
-            ]
+            parts: parts
           }
         ],
         generationConfig: {
-          temperature: 0.25,
-          topK: 40,
-          topP: 0.95,
+          temperature: 0.1,
+          topK: 16,
+          topP: 0.8,
           maxOutputTokens: 4096,
           responseModalities: [
             "IMAGE"
-          ],
-          imageConfig: {
-            aspectRatio: "1:1"
-          }
+          ]
         }
       };
       const response = await fetch(`${GEMINI_IMAGE_URL}?key=${GEMINI_API_KEY}`, {
@@ -764,34 +463,41 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
           }
         }
       }
-      
-      // Parse any JSON feedback from Gemini about placement generation
-      let generationFeedback = null;
+      return {
+        base64Data,
+        label
+      };
+    }
+    async function generatePlacementVersionLegacy(prompt, imageBase64, label, geminiApiKey, modelReferenceImage = null) {
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent";
+      const parts = [ { inlineData: { mimeType: "image/png", data: imageBase64 } } ];
+      if (modelReferenceImage) {
+        const m = modelReferenceImage.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
+        const d = m ? m[1] : modelReferenceImage;
+        parts.push({ inlineData: { mimeType: "image/png", data: d } });
+      }
+      parts.push({ text: prompt });
+      const body = { contents: [ { parts } ], generationConfig: { temperature: 0.1, topK: 16, topP: 0.8, maxOutputTokens: 4096, responseModalities: ["IMAGE"] } };
+      const response = await fetch(`${url}?key=${GEMINI_API_KEY}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!response.ok) throw new Error(`Legacy generation API error: ${response.status}`);
+      const result = await response.json();
+      let base64Data = null;
       if (result.candidates && result.candidates[0]) {
         const candidate = result.candidates[0];
         if (candidate.content && candidate.content.parts) {
           for (const part of candidate.content.parts) {
-            if (part.text) {
-              try {
-                const jsonMatch = part.text.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  generationFeedback = JSON.parse(jsonMatch[0]);
-                  console.log(`[DEBUG] Gemini placement generation feedback:`, generationFeedback);
-                  break;
-                }
-              } catch (e) {
-                console.log(`[DEBUG] Failed to parse placement generation feedback JSON:`, e.message);
-              }
+            const imageData = part.inlineData || part.inline_data;
+            if (imageData && imageData.data) {
+              let mimeType = imageData.mimeType || imageData.mime_type || 'image/png';
+              if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
+              if (!mimeType.startsWith('image/')) mimeType = 'image/png';
+              base64Data = `data:${mimeType};base64,${imageData.data}`;
+              break;
             }
           }
         }
       }
-      
-      return {
-        base64Data,
-        label,
-        generationFeedback
-      };
+      return { base64Data, label };
     }
     // Function to evaluate placement
     async function evaluatePlacement(evaluationPrompt, imageBase64, geminiApiKey) {
@@ -852,6 +558,40 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
       }
       return evaluation;
     }
+    async function evaluatePreservation(originalImageBase64, generatedImageBase64, geminiApiKey) {
+      const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+      const requestBody = {
+        contents: [
+          {
+            parts: [
+              { text: "Compare the two images. Respond ONLY with JSON: {\"same_building\": boolean, \"same_background\": boolean, \"overall_preserved\": boolean}" },
+              { inlineData: { mimeType: "image/png", data: originalImageBase64 } },
+              { inlineData: { mimeType: "image/png", data: generatedImageBase64 } }
+            ]
+          }
+        ],
+        generationConfig: { temperature: 0.1, topK: 16, topP: 0.8, maxOutputTokens: 1024 }
+      };
+      const response = await fetch(`${url}?key=${GEMINI_API_KEY}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+      if (!response.ok) return null;
+      const result = await response.json();
+      let parsed = null;
+      if (result.candidates && result.candidates[0]) {
+        const candidate = result.candidates[0];
+        if (candidate.content && candidate.content.parts) {
+          for (const part of candidate.content.parts) {
+            if (part.text) {
+              const m = part.text.match(/\{[\s\S]*\}/);
+              if (m) {
+                try { parsed = JSON.parse(m[0]); } catch {}
+                break;
+              }
+            }
+          }
+        }
+      }
+      return parsed;
+    }
     // Parse the input image
     const parsed = parseDataUri(image_data);
     const imageBase64 = parsed.base64Data;
@@ -871,7 +611,8 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
     for(let i = 0; i < initialVariations; i++){
       try {
         console.log(`[DEBUG] Generating placement variation ${i + 1}/${initialVariations}...`);
-        const variation = await generatePlacementVersion(buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio), currentBaseImage, `Placement ${i + 1}`, GEMINI_API_KEY);
+        // Pass new_awning_reference_image to generatePlacementVersion
+        const variation = await generatePlacementVersion(buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, null, !!new_awning_reference_image), currentBaseImage, `Placement ${i + 1}`, GEMINI_API_KEY, new_awning_reference_image);
         if (variation.base64Data) {
           // Validate image dimensions
           const validation = await validateImageDimensions(imageBase64, variation.base64Data, `placement variation ${i + 1}`);
@@ -883,7 +624,21 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
           const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
           const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
           const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
+          const preservation = await evaluatePreservation(imageBase64, evalBase64Data, GEMINI_API_KEY);
           const score = computePlacementScore(evaluation, new_awning_type);
+          if (!preservation || preservation.overall_preserved !== true) {
+            console.log(`[DEBUG] ✗ Variation ${i + 1} rejected - base image not preserved`);
+            variations.push({
+              label: variation.label,
+              base64: variation.base64Data,
+              evalParsed: evaluation,
+              evalScore: 0,
+              genError: "Base image not preserved",
+              evalError: null
+            });
+            await new Promise((resolve)=>setTimeout(resolve, 1000));
+            continue;
+          }
           variations.push({
             label: variation.label,
             base64: variation.base64Data,
@@ -936,9 +691,10 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
         try {
           console.log(`[DEBUG] Generating placement variation ${i + 1}/${maxVariations} (iterative improvement)...`);
           // Use improved prompt for iterative refinement
-          const basePrompt = buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio);
+          const basePrompt = buildPlacementPrompt(new_awning_type, String.fromCharCode(65 + i), new_fabric_color, null, !!new_awning_reference_image);
           const iterativePrompt = `${basePrompt}\n\nIMPORTANT: This is an iterative improvement. The current image already has an awning, but it needs refinement. Focus on:\n- Improving the awning's positioning and proportions\n- Enhancing the structural realism and mounting details\n- Better integration with the building architecture\n- Correcting any placement or scaling issues from the previous iteration`;
-          const variation = await generatePlacementVersion(iterativePrompt, currentBaseImage, `Placement ${i + 1} (Refined)`, GEMINI_API_KEY);
+          // Pass new_awning_reference_image to generatePlacementVersion
+          const variation = await generatePlacementVersion(iterativePrompt, currentBaseImage, `Placement ${i + 1} (Refined)`, GEMINI_API_KEY, new_awning_reference_image);
           if (variation.base64Data) {
             // Validate image dimensions
             const validation = await validateImageDimensions(imageBase64, variation.base64Data, `refined placement variation ${i + 1}`);
@@ -949,16 +705,30 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
             // Evaluate the placement
             const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
             const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
-            const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
-            const score = computePlacementScore(evaluation, new_awning_type);
+          const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
+          const preservation = await evaluatePreservation(imageBase64, evalBase64Data, GEMINI_API_KEY);
+          const score = computePlacementScore(evaluation, new_awning_type);
+          if (!preservation || preservation.overall_preserved !== true) {
+            console.log(`[DEBUG] ✗ Refined variation ${i + 1} rejected - base image not preserved`);
             variations.push({
               label: variation.label,
               base64: variation.base64Data,
               evalParsed: evaluation,
-              evalScore: score,
-              genError: null,
+              evalScore: 0,
+              genError: "Base image not preserved",
               evalError: null
             });
+            await new Promise((resolve)=>setTimeout(resolve, 1000));
+            continue;
+          }
+          variations.push({
+            label: variation.label,
+            base64: variation.base64Data,
+            evalParsed: evaluation,
+            evalScore: score,
+            genError: null,
+            evalError: null
+          });
             // Update best if this iteration improved
             if (score > bestScore) {
               bestScore = score;
@@ -1002,7 +772,26 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
     // Find the best placement
     const validVariations = variations.filter((v)=>v.base64 && v.evalScore > 0);
     if (validVariations.length === 0) {
-      throw new Error("No valid placement variations generated");
+      console.log('[DEBUG] No valid placement variations; attempting legacy model fallback...');
+      try {
+        const legacyPrompt = buildPlacementPrompt(new_awning_type, 'Legacy', new_fabric_color, null, !!new_awning_reference_image);
+        const legacyVar = await generatePlacementVersionLegacy(legacyPrompt, currentBaseImage, 'Placement (Legacy)', GEMINI_API_KEY, new_awning_reference_image);
+        if (legacyVar && legacyVar.base64Data) {
+          const val = await validateImageDimensions(imageBase64, legacyVar.base64Data, 'legacy placement');
+          const legacyEvalMatch = legacyVar.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
+          const legacyEvalData = legacyEvalMatch ? legacyEvalMatch[1] : legacyVar.base64Data;
+          const legacyEval = await evaluatePlacement(evaluationPrompt, legacyEvalData, GEMINI_API_KEY);
+          const legacyPres = await evaluatePreservation(imageBase64, legacyEvalData, GEMINI_API_KEY);
+          const legacyScore = legacyPres && legacyPres.overall_preserved === true ? computePlacementScore(legacyEval, new_awning_type) : 0;
+          variations.push({ label: legacyVar.label, base64: legacyVar.base64Data, evalParsed: legacyEval, evalScore: legacyScore, genError: null, evalError: null });
+        }
+      } catch (e) {
+        console.log('[DEBUG] Legacy fallback failed:', e.message);
+      }
+      const recheck = variations.filter((v)=>v.base64 && v.evalScore > 0);
+      if (recheck.length === 0) {
+        throw new Error("No valid placement variations generated");
+      }
     }
     const best = validVariations.reduce((a, b)=>a.evalScore > b.evalScore ? a : b);
     bestScore = best.evalScore;
@@ -1010,6 +799,10 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
     let processedImage = best.base64;
     let finalColorScore = 0;
     let colorGoalMet = false;
+    
+    // Determine pattern type globally for scope access in DB update
+    const finalPatternType = (new_fabric_color && (new_fabric_color.toLowerCase().includes('stripe') || new_fabric_color.toLowerCase().includes('gestreept'))) ? 'striped' : 'solid';
+
     // Color iteration phase (if fabric color is specified and placement score is good enough)
     if (new_fabric_color && best.base64 && bestScore >= 30) {
       console.log(`[DEBUG] Starting color iteration phase for color: ${new_fabric_color}`);
@@ -1024,8 +817,7 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
       // Extract base64 data for processing - use ORIGINAL input image for aspect ratio reference
       // Use the original input image (imageBase64) as the first image for aspect ratio preservation
       let colorBase64Data = imageBase64;
-      // Determine pattern type and stripe ratio
-      const finalPatternType = new_fabric_color.toLowerCase().includes('stripe') || new_fabric_color.toLowerCase().includes('gestreept') || pattern_type === 'striped' || pattern_type === 'gestreept' ? 'striped' : 'solid';
+      // Determine stripe ratio
       const finalStripeRatio = finalPatternType === 'striped' ? stripe_ratio || '1:1' : null;
       while(currentColorIteration <= maxColorIterations){
         try {
@@ -1036,72 +828,12 @@ IMPORTANT: If you have any analysis or feedback about the generation process, fo
           if (currentColorIteration === 1) {
             // First iteration: comprehensive color application
             if (finalPatternType === 'solid') {
-              colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}
-
-IMPORTANT: If you have feedback about the color application, format it as JSON:
-{
-  "color_application_status": "success|partial|failed",
-  "color_accuracy": 0.0-1.0,
-  "pattern_consistency": "uniform|mostly_uniform|inconsistent",
-  "fabric_visibility": "clear|partially_visible|obscured",
-  "notes": "observations about color application",
-  "adjustments_made": "description of changes applied"
-}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.
-
-IMPORTANT: If you have feedback about the color application, format it as JSON:
-{
-  "color_application_status": "success|partial|failed",
-  "color_accuracy": 0.0-1.0,
-  "pattern_consistency": "uniform|mostly_uniform|inconsistent",
-  "fabric_visibility": "clear|partially_visible|obscured",
-  "notes": "observations about color application",
-  "adjustments_made": "description of changes applied"
-}`;
+              colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.`;
             } else {
               if (finalStripeRatio === '1:1') {
-                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}
-
-IMPORTANT: If you have feedback about the pattern application, format it as JSON:
-{
-  "pattern_application_status": "success|partial|failed",
-  "pattern_accuracy": 0.0-1.0,
-  "stripe_consistency": "uniform|mostly_uniform|inconsistent",
-  "color_alternation": "correct|partially_correct|incorrect",
-  "notes": "observations about pattern application",
-  "stripe_issues": "description of any stripe problems"
-}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.
-
-IMPORTANT: If you have feedback about the stripe application, format it as JSON:
-{
-  "pattern_application_status": "success|partial|failed",
-  "pattern_accuracy": 0.0-1.0,
-  "stripe_consistency": "uniform|mostly_uniform|inconsistent",
-  "color_alternation": "correct|partially_correct|incorrect",
-  "notes": "observations about stripe application",
-  "stripe_issues": "description of any stripe problems"
-}`;
+                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes to the awning fabric only. CRITICAL: Create EQUAL WIDTH STRIPES where each stripe is exactly the same width as adjacent stripes. Ensure alternating colors with NO DUPLICATE COLORS side by side. Each stripe must be distinct from its neighbors.`;
               } else {
-                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}
-
-IMPORTANT: If you have feedback about the pattern application, format it as JSON:
-{
-  "pattern_application_status": "success|partial|failed",
-  "pattern_accuracy": 0.0-1.0,
-  "stripe_ratio_accuracy": 0.0-1.0,
-  "pattern_consistency": "uniform|mostly_uniform|inconsistent",
-  "notes": "observations about pattern application",
-  "ratio_issues": "description of any ratio problems"
-}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. Create consistent pattern across entire fabric surface, maintaining stripe proportions.
-
-IMPORTANT: If you have feedback about the stripe application, format it as JSON:
-{
-  "pattern_application_status": "success|partial|failed",
-  "pattern_accuracy": 0.0-1.0,
-  "stripe_ratio_accuracy": 0.0-1.0,
-  "pattern_consistency": "uniform|mostly_uniform|inconsistent",
-  "notes": "observations about stripe application",
-  "ratio_issues": "description of any ratio problems"
-}`;
+                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. Create consistent pattern across entire fabric surface, maintaining stripe proportions.`;
               }
             }
           } else {
@@ -1129,22 +861,14 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
             {
               inlineData: {
                 mimeType: "image/png",
-                data: colorBase64Data
+                data: currentColorImageData.replace(/^data:image\/\w+;base64,/, "")
               }
             },
             {
               text: colorEditPrompt
             }
           ];
-          // Add the placement-processed image as a second reference (for the awning to color)
-          const placementBase64Match = currentColorImageData.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
-          const placementBase64Data = placementBase64Match ? placementBase64Match[1] : currentColorImageData;
-          colorEditRequestParts.push({
-            inlineData: {
-              mimeType: "image/png",
-              data: placementBase64Data
-            }
-          });
+          
           // Add color swatch image as reference if available
           if (hasColorSwatch) {
             const swatchParsed = parseDataUri(color_swatch_image);
@@ -1162,19 +886,16 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
               }
             ],
             generationConfig: {
-              temperature: 0.4,
-              topK: 32,
-              topP: 1,
+              temperature: 0.1,
+              topK: 16,
+              topP: 0.8,
               maxOutputTokens: 4096,
               responseModalities: [
                 "IMAGE"
-              ],
-              imageConfig: {
-                aspectRatio: "1:1"
-              }
+              ]
             }
           };
-          const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent";
+          const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent";
           const colorEditResponse = await fetch(`${GEMINI_IMAGE_URL}?key=${GEMINI_API_KEY}`, {
             method: 'POST',
             headers: {
@@ -1186,31 +907,19 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
             throw new Error(`Color edit API error: ${colorEditResponse.status}`);
           }
           const colorEditResult = await colorEditResponse.json();
-          // Extract edited image and application feedback
+          // Extract edited image
           let editedColorImageData = null;
-          let colorApplicationFeedback = null;
           if (colorEditResult.candidates && colorEditResult.candidates[0]) {
             const candidate = colorEditResult.candidates[0];
             if (candidate.content && candidate.content.parts) {
               for (const part of candidate.content.parts){
-                // Extract image data
                 const imageData = part.inlineData || part.inline_data;
                 if (imageData && imageData.data) {
                   let mimeType = imageData.mimeType || imageData.mime_type || 'image/png';
                   if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
                   if (!mimeType.startsWith('image/')) mimeType = 'image/png';
                   editedColorImageData = `data:${mimeType};base64,${imageData.data}`;
-                }
-                // Extract JSON feedback from text parts
-                if (part.text && !colorApplicationFeedback) {
-                  try {
-                    const jsonMatch = part.text.match(/\{[\s\S]*\}/);
-                    if (jsonMatch) {
-                      colorApplicationFeedback = JSON.parse(jsonMatch[0]);
-                    }
-                  } catch (e) {
-                    console.log(`Failed to parse color application feedback JSON:`, e.message);
-                  }
+                  break;
                 }
               }
             }
@@ -1330,12 +1039,11 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
               goal_met: false
             };
           }
-          // Calculate color score
           const { score: colorScore, issues: colorIssues } = calculateColorIterationScore(colorEvaluation, finalPatternType);
           // Debug output for color scoring
           console.log(`[DEBUG] Color iteration ${currentColorIteration} evaluation:`);
           console.log(`[DEBUG] - Score: ${colorScore}/100`);
-          console.log(`[DEBUG] - Goal met: ${colorEvaluation.goal_met}`);
+          console.log(`[DEBUG] - Goal met: ${colorScore >= colorGoalThreshold}`);
           console.log(`[DEBUG] - Color threshold: ${colorGoalThreshold}`);
           console.log(`[DEBUG] - Issues found: ${colorIssues.length > 0 ? colorIssues.join(', ') : 'None'}`);
           // Store iteration data
@@ -1345,8 +1053,7 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
             goalMet: colorEvaluation.goal_met,
             evaluation: colorEvaluation,
             issues: colorIssues,
-            imageData: editedColorImageData,
-            applicationFeedback: colorApplicationFeedback
+            imageData: editedColorImageData
           });
           // Update best if this iteration improved
           if (colorScore > bestColorScore) {
@@ -1354,8 +1061,7 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
             bestColorIteration = currentColorIteration;
             bestColorImageData = editedColorImageData;
           }
-          // Check if goal is met
-          if (colorEvaluation.goal_met && colorScore >= colorGoalThreshold) {
+          if (colorScore >= colorGoalThreshold) {
             console.log(`[DEBUG] Color goal achieved in iteration ${currentColorIteration}! Score: ${colorScore}`);
             colorGoalMet = true;
             finalColorScore = colorScore;
@@ -1377,8 +1083,7 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
             issues: [
               error.message
             ],
-            imageData: null,
-            applicationFeedback: null
+            imageData: null
           });
           currentColorIteration++;
         }
@@ -1388,9 +1093,6 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
         console.log(`[DEBUG] Using best color iteration ${bestColorIteration} with score: ${bestColorScore}`);
         finalColorScore = bestColorScore;
         processedImage = bestColorImageData;
-      } else if (colorGoalMet) {
-        // If color goal was met, use the current color image
-        processedImage = currentColorImageData;
       }
       // If no color iterations succeeded, processedImage remains as best.base64
       console.log(`[DEBUG] Color iteration phase complete. Final score: ${finalColorScore}, Goal met: ${colorGoalMet}`);
@@ -1409,26 +1111,163 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
     console.log(`[DEBUG] - Overall goal achieved: ${overallGoalAchieved}`);
     console.log(`[DEBUG] - Final score: ${finalScore}`);
     // Send completion notification email
-    let completionEmailSent = false;
-    console.log('DEBUG: Checking completion email conditions:');
-    console.log('- send_notifications:', send_notifications);
-    console.log('- customer_email:', customer_email);
-    console.log('- gmailService:', !!gmailService);
-    console.log('- processedImage:', !!processedImage);
-    if (send_notifications && customer_email && gmailService && processedImage) {
-      console.log('DEBUG: All conditions met, attempting to send completion email...');
+    console.log('DEBUG: Completion email notifications disabled');
+    
+    // Helper function to upload image to Supabase
+    async function uploadImageToSupabase(supabase, imageDataBase64, bucketName = 'visualizations') {
       try {
-        await gmailService.sendCompletionNotification(customer_email, customer_name, new_awning_type, processedImage, overallGoalAchieved, finalScore, priceData);
-        completionEmailSent = true;
-        console.log('Completion notification email sent successfully');
-      } catch (error) {
-        console.error('Failed to send completion notification email:', error);
-        console.error('Error details:', error.message);
-        console.error('Error stack:', error.stack);
+        // Handle data URI prefix if present
+        const base64Data = imageDataBase64.replace(/^data:image\/\w+;base64,/, "");
+        const binaryStr = atob(base64Data);
+        const len = binaryStr.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+        
+        const timestamp = new Date().getTime();
+        const fileName = `visualization_${timestamp}_${Math.random().toString(36).substring(7)}.png`;
+        
+        // Upload to Storage
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from(bucketName)
+          .upload(fileName, bytes, {
+            contentType: 'image/png',
+            upsert: false
+          });
+          
+        if (uploadError) {
+          console.error(`Supabase storage upload error (bucket: ${bucketName}):`, uploadError);
+          // Try 'generated-images' bucket if default fails
+          if (bucketName !== 'generated-images') {
+             console.log('Retrying with generated-images bucket...');
+             return uploadImageToSupabase(supabase, imageDataBase64, 'generated-images');
+          }
+          return null;
+        }
+        
+        // Get Public URL
+        const { data: publicUrlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(fileName);
+          
+        return {
+            publicUrl: publicUrlData.publicUrl,
+            fileName: fileName,
+            fullPath: uploadData?.path || fileName
+        };
+      } catch (err) {
+        console.error('Supabase upload helper failed:', err);
+        return null;
+      }
+    }
+
+    // Store result in Supabase
+    let uploadResult = null;
+    let originalUploadResult = null;
+    
+    if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+      try {
+        console.log('DEBUG: Attempting to store images in Supabase...');
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+        
+        // Upload Generated Image
+        if (processedImage) {
+            uploadResult = await uploadImageToSupabase(supabase, processedImage);
+            if (uploadResult) {
+                console.log('DEBUG: Generated image stored. URL:', uploadResult.publicUrl);
+            }
+        }
+
+        // Upload Original Image
+        if (image_data) {
+            originalUploadResult = await uploadImageToSupabase(supabase, image_data);
+            if (originalUploadResult) {
+                console.log('DEBUG: Original image stored. URL:', originalUploadResult.publicUrl);
+            }
+        }
+        
+        // Insert or Update record into database
+        if (uploadResult && uploadResult.publicUrl) {
+            try {
+                // Prepare configuration object with all metadata and extra fields
+                const newConfiguration = {
+                    // Core results
+                    score: finalScore,
+                    placement_score: bestScore,
+                    color_score: finalColorScore,
+                    goal_achieved: overallGoalAchieved,
+                    pattern_type: finalPatternType,
+                    stripe_ratio: stripe_ratio,
+                    generated_at: new Date().toISOString(),
+                    
+                    // Input parameters
+                    model: new_awning_type,
+                    color: new_fabric_color,
+                    customer_email: customer_email,
+                    
+                    // Image references (if needed in config for easy access)
+                    generated_image_url: uploadResult.publicUrl,
+                    original_image_url: originalUploadResult ? originalUploadResult.publicUrl : null
+                };
+
+                if (recordId) {
+                    console.log(`DEBUG: Updating existing record ${recordId} with status completed...`);
+                    
+                    // Fetch existing configuration to merge
+                    const { data: existingRecord } = await supabase
+                        .from('visualizations')
+                        .select('configuration')
+                        .eq('id', recordId)
+                        .single();
+                        
+                    const mergedConfiguration = {
+                        ...(existingRecord?.configuration || {}),
+                        ...newConfiguration
+                    };
+
+                    // Update existing record
+                    const { error: updateError } = await supabase
+                        .from('visualizations')
+                        .update({
+                            output_image_path: uploadResult.fileName,
+                            status: 'completed',
+                            configuration: mergedConfiguration,
+                            updated_at: new Date().toISOString()
+                        })
+                        .eq('id', recordId);
+                    
+                    if (updateError) {
+                        console.error('DEBUG: Update failed:', updateError);
+                        throw updateError;
+                    }
+                    console.log(`DEBUG: Database record ${recordId} updated successfully`);
+                } else {
+                    // Validate required fields for insert
+                    const inputPath = originalUploadResult ? originalUploadResult.fileName : `generated_input_${Date.now()}.png`;
+                    
+                    await supabase.from('visualizations').insert({
+                        project_name: customer_name || 'API Generated Project',
+                        status: 'completed',
+                        input_image_path: inputPath,
+                        output_image_path: uploadResult.fileName,
+                        configuration: newConfiguration,
+                        // updated_at is automatic or can be set
+                    });
+                    console.log('DEBUG: Database record inserted successfully');
+                }
+            } catch (dbError) {
+                console.log('DEBUG: Database operation failed (non-critical):', dbError.message);
+            }
+        }
+        
+      } catch (err) {
+        console.error('Supabase storage process failed:', err);
       }
     } else {
-      console.log('DEBUG: Completion email not sent - conditions not met');
+      console.log('DEBUG: Skipping Supabase storage - missing credentials');
     }
+
     // Prepare debug object
     const debugInfo = {
       placementVariations: variations.map((v)=>({
@@ -1447,19 +1286,12 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
           issues: ci.issues
         })) : [],
       emailNotifications: {
-        startEmailSent,
-        completionEmailSent,
-        gmailServiceAvailable: !!gmailService,
-        notificationsEnabled: send_notifications,
-        customerEmailProvided: !!customer_email
+        notificationsEnabled: false,
+        message: "Email functionality removed"
       },
-      priceCalculation: priceData ? {
-        included: true,
-        totalPrice: priceData.totalPrice,
-        calculatedAt: priceData.calculatedAt
-      } : {
+      priceCalculation: {
         included: false,
-        reason: !include_price_indication ? 'Not requested' : 'Missing required parameters'
+        reason: 'Price calculation functionality removed'
       }
     };
     // Return successful response
@@ -1472,7 +1304,7 @@ IMPORTANT: If you have feedback about the stripe application, format it as JSON:
       goal_achieved: overallGoalAchieved,
       awning_type: new_awning_type,
       fabric_color: new_fabric_color,
-      price_data: priceData,
+      price_data: null,
       debug: debugInfo
     }), {
       status: 200,

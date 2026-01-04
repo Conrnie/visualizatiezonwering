@@ -184,6 +184,32 @@ header p {
     background: white;
 }
 
+/* Special styling for model options without images */
+.model-content.no-image {
+    min-height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid #e9ecef;
+    background: #f8f9fa;
+}
+
+.model-content.no-image .model-name {
+    padding: 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #495057;
+}
+
+.model-option input[type="radio"]:checked + .model-content.no-image {
+    border-color: #667eea;
+    background: #f0f4ff;
+}
+
+.model-option input[type="radio"]:checked + .model-content.no-image .model-name {
+    color: #667eea;
+}
+
 /* Kleur opties */
 .color-options {
     display: grid;
@@ -659,93 +685,6 @@ header p {
     }
 }
 
-/* Email notificatie sectie styling */
-.email-notification-section {
-    margin: 20px 0;
-    padding: 20px;
-    background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-    border-radius: 12px;
-    border: 1px solid #e1bee7;
-}
-
-.email-notification-fields {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 20px;
-    margin-top: 20px;
-    padding: 20px;
-    background: white;
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
-}
-
-.email-notification-fields .form-group {
-    margin-bottom: 0;
-}
-
-.email-notification-fields .form-group.full-width {
-    grid-column: 1 / -1;
-}
-
-.email-notification-fields label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 500;
-    color: #495057;
-    font-size: 14px;
-}
-
-.email-notification-fields input {
-    width: 100%;
-    padding: 12px 16px;
-    border: 2px solid #e9ecef;
-    border-radius: 8px;
-    font-size: 16px;
-    transition: all 0.3s ease;
-    background: #fff;
-    box-sizing: border-box;
-}
-
-.email-notification-fields input:focus {
-    outline: none;
-    border-color: #9c27b0;
-    box-shadow: 0 0 0 3px rgba(156, 39, 176, 0.1);
-}
-
-.email-notification-fields input::placeholder {
-    color: #6c757d;
-    font-style: italic;
-}
-
-.email-notification-fields input:hover {
-    border-color: #ced4da;
-}
-
-.email-info {
-    background: #f8f9fa;
-    padding: 16px;
-    border-radius: 8px;
-    border-left: 4px solid #9c27b0;
-    margin-top: 16px;
-}
-
-.email-info p {
-    margin-bottom: 12px;
-    font-weight: 600;
-    color: #495057;
-}
-
-.email-info ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.email-info li {
-    padding: 4px 0;
-    color: #6c757d;
-    font-size: 14px;
-}
 
 /* Prijsindicatie sectie styling */
 .price-indication-section {
@@ -755,6 +694,8 @@ header p {
     border-radius: 12px;
     border: 1px solid #e9ecef;
 }
+
+/* Email notifications removed */
 
 .checkbox-group {
     display: flex;
@@ -804,6 +745,8 @@ header p {
     font-size: 14px;
 }
 
+/* Email notification fields removed */
+
 .price-indication-fields input {
     width: 100%;
     padding: 12px 16px;
@@ -825,6 +768,8 @@ header p {
     color: #6c757d;
     font-style: italic;
 }
+
+/* Email notification inputs removed */
 
 .price-indication-fields input:hover {
     border-color: #ced4da;

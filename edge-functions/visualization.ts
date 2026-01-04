@@ -165,7 +165,7 @@ Deno.serve(async (req)=>{
     console.log('Processing image generation request...');
     // Parse request body
     const body = await req.json();
-    const { image_data, new_awning_type, new_fabric_color, pattern_type, stripe_ratio, color_swatch_image, customer_email, customer_name, send_notifications = false } = body;
+    const { image_data, new_awning_type, new_awning_model, new_fabric_color, pattern_type, stripe_ratio, color_swatch_image, customer_email, customer_name, send_notifications = false, new_awning_reference_image } = body;
     // Assign correct variable names for processing
     const image = image_data;
     const awning_type = new_awning_type;
@@ -176,10 +176,12 @@ Deno.serve(async (req)=>{
     console.log('Debug - Original image dimensions:', originalWidth, 'x', originalHeight);
     console.log('Debug - Request parameters:');
     console.log('awning_type:', awning_type);
+    console.log('new_awning_model:', new_awning_model);
     console.log('new_fabric_color:', new_fabric_color);
     console.log('pattern_type:', pattern_type);
     console.log('stripe_ratio:', stripe_ratio);
     console.log('color_swatch_image:', color_swatch_image ? 'provided' : 'not provided');
+    console.log('new_awning_reference_image:', new_awning_reference_image ? 'provided' : 'not provided');
     console.log('send_notifications:', send_notifications);
     console.log('customer_email:', customer_email);
     if (!image) {
@@ -214,6 +216,28 @@ Deno.serve(async (req)=>{
         mimeType: match[1],
         base64Data: match[2]
       };
+    }
+    // Flexible parser supporting data URIs, local files, and URLs
+    async function parseAnyImageToDataUri(input) {
+      if (!input || typeof input !== 'string') {
+        throw new Error('Invalid image input');
+      }
+      if (input.startsWith('data:image')) {
+        return parseDataUri(input);
+      }
+      if (input.startsWith('http://') || input.startsWith('https://')) {
+        const resp = await fetch(input);
+        if (!resp.ok) throw new Error(`Failed to fetch image: ${resp.status}`);
+        const buf = new Uint8Array(await resp.arrayBuffer());
+        const base64Data = encode(buf);
+        const mime = resp.headers.get('content-type') || 'image/jpeg';
+        return { mimeType: mime, base64Data };
+      }
+      // Treat as local path
+      const bytes = await Deno.readFile(input);
+      const base64Data = encode(bytes);
+      const mime = input.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+      return { mimeType: mime, base64Data };
     }
     // Function to get image dimensions without resizing
     async function getImageDimensions(dataUri) {
@@ -274,14 +298,15 @@ Deno.serve(async (req)=>{
       }
     }
     // Function to build placement prompt for different awning types with variation strategies
-    function buildPlacementPrompt(awningType, variation, fabricColor, patternType, stripeRatio) {
-      // Translate Dutch awning types to descriptive English terms with specific model characteristics
+    function buildPlacementPrompt(awningType, awningModel, variation, fabricColor, patternType, stripeRatio, hasModelReference = false) {
+      // Translate awning types to descriptive English terms with specific model characteristics
       const awningDescriptions = {
         knikarm: "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING: This MUST be EXACTLY a knikarm-style retractable awning with these STRICT VISUAL REQUIREMENTS: 1) WALL-MOUNTED CASSETTE: A horizontal rectangular cassette/housing mounted on the wall above the window containing the fabric roller, 2) TWO ARTICULATED FOLDING ARMS: Exactly TWO visible jointed support arms that extend horizontally outward from the wall in a scissor/folding mechanism - these arms MUST have visible joints/hinges and extend straight out horizontally, 3) HORIZONTAL FABRIC EXTENSION: The fabric stretches horizontally between the two folding arms creating a flat canopy that projects outward from the building, 4) MODERN METAL CONSTRUCTION: Arms and cassette should be sleek metal (typically white, grey, or black), 5) RETRACTABLE MECHANISM: The arms must appear capable of folding back against the wall when retracted. CRITICAL: This is NOT a fixed canopy, NOT a drop-down shade, NOT a traditional awning with curved top - it must be specifically a modern retractable folding arm awning (knikarm) with horizontal extending articulated arms and a wall-mounted cassette.",
         knikarmscherm: "MANDATORY KNIKARM RETRACTABLE FOLDING ARM AWNING: This MUST be EXACTLY a knikarm-style retractable awning with these STRICT VISUAL REQUIREMENTS: 1) WALL-MOUNTED CASSETTE: A horizontal rectangular cassette/housing mounted on the wall above the window containing the fabric roller, 2) TWO ARTICULATED FOLDING ARMS: Exactly TWO visible jointed support arms that extend horizontally outward from the wall in a scissor/folding mechanism - these arms MUST have visible joints/hinges and extend straight out horizontally, 3) HORIZONTAL FABRIC EXTENSION: The fabric stretches horizontally between the two folding arms creating a flat canopy that projects outward from the building, 4) MODERN METAL CONSTRUCTION: Arms and cassette should be sleek metal (typically white, grey, or black), 5) RETRACTABLE MECHANISM: The arms must appear capable of folding back against the wall when retracted. CRITICAL: This is NOT a fixed canopy, NOT a drop-down shade, NOT a traditional awning with curved top - it must be specifically a modern retractable folding arm awning (knikarm) with horizontal extending articulated arms and a wall-mounted cassette.",
         uitvalarm: "VERTICAL DROP ARM AWNING (uitvalarm type): This must be a VERTICAL WINDOW SHADE STYLE awning that drops DOWN from above the window, similar to a large outdoor window blind. CRITICAL VISUAL CHARACTERISTICS: 1) VERTICAL FABRIC ORIENTATION - the fabric must hang DOWN vertically like a window shade or blind, NOT extend horizontally outward, 2) COMPACT WALL-MOUNTED CASSETTE - small horizontal housing mounted above the window containing the roller mechanism, 3) VERTICAL DROP MECHANISM - fabric unrolls downward to cover the window vertically, dropping approximately 1-2 meters down from the cassette, 4) SHORT ANGLED SUPPORT ARMS - two SHORT diagonal support arms (maximum 50-80cm length) extend from the bottom edge of the fabric at approximately 45-degree angles to hold the fabric away from the window. CRITICAL: These arms must be SHORT and should NOT extend down to the ground or anywhere near the ground level - they are just short supports to hold the fabric away from the window, 5) WINDOW COVERAGE - the fabric primarily covers the window area vertically, not projecting far outward like a traditional canopy. This is essentially a large VERTICAL WINDOW SHADE for outdoor use, NOT a horizontal projecting canopy. The fabric should drop DOWN to cover the window, not extend OUT to create shade above. Think 'vertical window blind with short support arms' not 'horizontal canopy'. The arms are SUPPORT STRUTS, not long extending poles.",
         uitvalscherm: "VERTICAL DROP ARM AWNING (uitvalarm type): This must be a VERTICAL WINDOW SHADE STYLE awning that drops DOWN from above the window, similar to a large outdoor window blind. CRITICAL VISUAL CHARACTERISTICS: 1) VERTICAL FABRIC ORIENTATION - the fabric must hang DOWN vertically like a window shade or blind, NOT extend horizontally outward, 2) COMPACT WALL-MOUNTED CASSETTE - small horizontal housing mounted above the window containing the roller mechanism, 3) VERTICAL DROP MECHANISM - fabric unrolls downward to cover the window vertically, dropping approximately 1-2 meters down from the cassette, 4) SHORT ANGLED SUPPORT ARMS - two SHORT diagonal support arms (maximum 50-80cm length) extend from the bottom edge of the fabric at approximately 45-degree angles to hold the fabric away from the window. CRITICAL: These arms must be SHORT and should NOT extend down to the ground or anywhere near the ground level - they are just short supports to hold the fabric away from the window, 5) WINDOW COVERAGE - the fabric primarily covers the window area vertically, not projecting far outward like a traditional canopy. This is essentially a large VERTICAL WINDOW SHADE for outdoor use, NOT a horizontal projecting canopy. The fabric should drop DOWN to cover the window, not extend OUT to create shade above. Think 'vertical window blind with short support arms' not 'horizontal canopy'. The arms are SUPPORT STRUTS, not long extending poles.",
-        markiezen: "TRADITIONAL FIXED CANOPY AWNING (markiezen type): A fixed canopy with a rigid frame that projects slightly outward above the window/door. CRITICAL VISUAL CHARACTERISTICS: 1) Canopy SHAPE is curved or wedge-shaped (no flat horizontal top), 2) Fabric SIDE CHEEKS are present along the sides, 3) FRONT FABRIC VALANCE hangs at the leading edge (scalloped or straight), 4) Frame is concealed or painted to match (wood or light-coloured metal), 5) Not retractable. DO NOT add folding arms, front rollers, cassettes, or any BLACK METAL FRONT BAR typical of knikarm awnings."
+        markiezen: "TRADITIONAL FIXED CANOPY AWNING (markiezen type): A fixed canopy with a rigid frame that projects slightly outward above the window/door. CRITICAL VISUAL CHARACTERISTICS: 1) Canopy SHAPE is curved or wedge-shaped (no flat horizontal top), 2) Fabric SIDE CHEEKS are present along the sides, 3) FRONT FABRIC VALANCE hangs at the leading edge (scalloped or straight), 4) Frame is concealed or painted to match (wood or light-coloured metal), 5) Not retractable. DO NOT add folding arms, front rollers, cassettes, or any BLACK METAL FRONT BAR typical of knikarm awnings.",
+        canopy: "CANOPY AWNING (modern fixed canopy): A rectangular or wedge fixed canopy with clean, minimal frame. CRITICAL: No retractable arms, no front roller/cassette. Simple wall-bracket supports or side rails, flat front panel, fabric tight and smooth."
       };
       // Define different variation strategies for better diversity
       const variationStrategies = {
@@ -291,43 +316,136 @@ Deno.serve(async (req)=>{
         D: "precise scaling to window width, emphasize natural draping",
         E: "balanced approach with moderate scaling, enhanced perspective matching"
       };
-      const awningDescription = awningDescriptions[awningType] || `${awningType} awning`;
+      // Force markiezen type when traditional model selected
+      let effectiveAwningType = awningType;
+      if (awningModel === "markiezen-model1" || awningType === "markiezen") {
+        effectiveAwningType = "markiezen";
+      } else if (awningModel === 'canopy-model1' || awningType === 'canopy' || (awningType && awningType.toLowerCase().includes('canopy'))) {
+        effectiveAwningType = 'canopy';
+      }
+      const awningDescription = hasModelReference
+        ? `${awningDescriptions[effectiveAwningType] || `${effectiveAwningType} awning`} THAT MATCHES THE REFERENCE MODEL EXACTLY`
+        : (awningDescriptions[effectiveAwningType] || `${effectiveAwningType} awning`);
       // Build color and pattern description
       let colorDescription = "";
+      let colorDescriptionNL = "";
       if (fabricColor && fabricColor !== 'default') {
         if (patternType === 'striped' || patternType === 'gestreept') {
           const ratio = stripeRatio || '1:1';
           colorDescription = ` The awning fabric should have ${fabricColor} striped pattern with ${ratio} stripe ratio. Apply the stripes evenly across the fabric surface.`;
+          colorDescriptionNL = ` Het markiesdoek heeft een gestreept patroon in ${fabricColor} met een strookverhouding van ${ratio}. Breng de strepen overal gelijkmatig aan.`;
         } else {
           colorDescription = ` The awning fabric should be ${fabricColor} solid color. Apply uniform color across the entire fabric surface.`;
+          colorDescriptionNL = ` Het markiesdoek is effen ${fabricColor}. Kleur het doek overal gelijkmatig zonder variatie.`;
         }
       }
-      // Combined model and color description (type-specific)
+      // Combined model and color description (model-specific)
       let modelDescription = "";
-      if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        modelDescription = `Use modern metal folding arms and a slim cassette; arms/frame may be dark grey or black. Keep hardware consistent with a retractable arm awning.${colorDescription}`;
+      let modelDescriptionNL = "";
+      if (hasModelReference) {
+        // Get type-specific description first
+        let typeSpecificDescription = "";
+        if (awningModel === "markiezen-model1" || effectiveAwningType === "markiezen") {
+          typeSpecificDescription = "MARKIEZEN SPECIFICATIONS: Create a COMPLETELY FIXED TRADITIONAL CANOPY AWNING with curved or wedge-shaped fabric roof, fabric side cheeks, front fabric valance, and concealed frame. ABSOLUTELY FORBIDDEN: NO folding arms, NO front roller, NO cassette, NO black metal front bar, NO retractable hardware, NO manual operating devices, NO moving components whatsoever.";
+        } else if (awningModel === "knikarm-model1" || effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+          typeSpecificDescription = "KNIKARM SPECIFICATIONS: Use modern metal folding arms and a slim cassette; arms/frame may be dark grey or black. Keep hardware consistent with a retractable arm awning.";
+        } else if (effectiveAwningType === "uitvalarm" || effectiveAwningType === "uitvalscherm") {
+          typeSpecificDescription = "UITVALARM SPECIFICATIONS: Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.";
+        } else if (effectiveAwningType === 'canopy') {
+          typeSpecificDescription = "CANOPY SPECIFICATIONS: Create a MODERN FIXED CANOPY with simple rectangular/wedge shape, clean front panel, minimal brackets. ABSOLUTELY FORBIDDEN: NO folding arms, NO front roller, NO cassette, NO retractable hardware.";
+        }
+
+        modelDescription = `STRICT MODEL MATCHING: Use the attached awning model reference image to determine type and construction. Replicate the geometry, proportions, canopy/arm style, and any visible hardware exactly as in the reference. Do not invent mechanical parts that are not clearly present in the reference.
+
+TYPE-SPECIFIC REQUIREMENTS: ${typeSpecificDescription}${colorDescription}`;
+        
+        if (effectiveAwningType === "markiezen") {
+          modelDescriptionNL = `STRENGE MODELNALIJVING: Gebruik de referentieafbeelding van het zonnescherm om type en constructie te bepalen. Kopieer geometrie, verhoudingen en zichtbare details exact zoals in de referentie. Dit is een MARKIES: absoluut GEEN knikarmen, GEEN cassette of frontrol, GEEN zwarte metalen voorlijst, GEEN verticale wandsteunen/brackets en GEEN bediening of bewegende delen.${colorDescriptionNL}`;
+        }
+      } else if (awningModel === "knikarm-model1") {
+        modelDescription = `KNIKARM MODEL 1 SPECIFICATIONS: Use modern metal folding arms and a slim cassette; arms/frame may be dark grey or black. Keep hardware consistent with a retractable arm awning. ABSOLUTELY NO vertical ground-support posts or poles under the front edge; the awning is cantilevered from wall brackets only.${colorDescription}`;
+      } else if (awningModel === "markiezen-model1") {
+        modelDescription = `MARKIEZEN MODEL 1 SPECIFICATIONS: Create a COMPLETELY FIXED TRADITIONAL CANOPY AWNING with these EXACT characteristics: 1) CURVED OR WEDGE-SHAPED FABRIC ROOF that projects outward from the wall in a permanent arc or slope, 2) FABRIC SIDE CHEEKS (triangular fabric panels) that hang down on both sides of the canopy, 3) FRONT FABRIC VALANCE (decorative fabric edge) hanging down from the front edge, 4) CONCEALED OR PAINTED FRAME that blends with the building, 5) ZERO MOVING PARTS - this is a completely static permanent structure with NO MECHANISMS OF ANY KIND. ABSOLUTELY FORBIDDEN: NO folding arms, NO front roller, NO cassette, NO black metal front bar, NO retractable hardware, NO manual operating devices, NO moving components whatsoever. This is NOT a knikarm - it's a traditional European-style fixed canopy that is permanently installed and never moves.${colorDescription}`;
+        modelDescriptionNL = `SPECIFICATIES MARKIES MODEL 1: Maak een VOLLEDIG VASTE TRADITIONELE MARKIES met de volgende kenmerken: 1) Gebogen of wigvormig doekdak dat permanent vanaf de gevel naar buiten steekt, 2) Doek-zijschotten aan beide kanten, 3) Voorste doekvolant (rechte of golvende afwerking), 4) Frame verborgen of in gevelkleur, 5) GEEN bewegende onderdelen. ABSOLUUT VERBODEN: geen knikarmen, geen frontrol, geen cassette, geen zwarte metalen voorlijst, geen retractiemechanisme, geen handbediening of andere bewegende componenten.${colorDescriptionNL}`;
+      } else if (awningType === "knikarm" || awningType === "knikarmscherm") {
+        modelDescription = `Use modern metal folding arms and a slim cassette; arms/frame may be dark grey or black. Keep hardware consistent with a retractable arm awning. ABSOLUTELY NO vertical ground-support posts or poles; the design must be cantilevered from wall-mounted brackets only.${colorDescription}`;
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
         modelDescription = `Use a compact wall-mounted cassette and two SHORT angled support arms (50–80 cm). Hardware should be minimal and light-coloured (white/grey); avoid heavy black bars.${colorDescription}`;
       } else if (awningType === "markiezen") {
-        modelDescription = `Use a traditional fixed canopy: a curved or wedge-shaped fabric roof with side cheeks and a front fabric valance. Frame is concealed or painted to match; NO folding arms, NO front roller/cassette, and NO black metal front bar.${colorDescription}`;
+        modelDescription = `MANDATORY MARKIEZEN TRADITIONAL FIXED CANOPY SPECIFICATIONS: Create a COMPLETELY FIXED TRADITIONAL CANOPY AWNING with these EXACT characteristics: 1) CURVED OR WEDGE-SHAPED FABRIC ROOF that projects outward from the wall in a permanent arc or slope, 2) FABRIC SIDE CHEEKS (triangular fabric panels) that hang down on both sides of the canopy, 3) FRONT FABRIC VALANCE (decorative fabric edge) hanging down from the front edge, 4) CONCEALED OR PAINTED FRAME that blends with the building, 5) ZERO MOVING PARTS - this is a completely static permanent structure with NO MECHANISMS OF ANY KIND. ABSOLUTELY FORBIDDEN: NO folding arms, NO front roller, NO cassette, NO black metal front bar, NO retractable hardware, NO manual operating devices, NO moving components whatsoever. This is NOT a knikarm - it's a traditional European-style fixed canopy that is permanently installed and never moves.${colorDescription}`;
+        modelDescriptionNL = `VERPLICHTE MARKIES-SPECIFICATIES: Maak een VOLLEDIG VASTE TRADITIONELE MARKIES met: 1) Gebogen of wigvormig doekdak dat naar buiten projecteert vanaf de gevel, 2) Doek-zijschotten aan beide kanten, 3) Voorste doekvolant, 4) Frame verborgen of meegeschilderd, 5) GEEN bewegende delen. ABSOLUUT VERBODEN: knikarmen, cassette/frontrol, zwarte metalen voorlijst, verticale wandbeugels of steunarmen, handkruk/slingerarm of andere bediening.${colorDescriptionNL}`;
+      } else if (awningType === 'canopy') {
+        modelDescription = `MANDATORY CANOPY SPECIFICATIONS: Create a MODERN FIXED CANOPY with a simple rectangular or wedge shape, clean straight front edge, tight fabric, and minimal wall brackets. Absolutely NO retractable arms, NO front roller, NO cassette. Keep brackets subtle and realistic.${colorDescription}`;
       } else {
         modelDescription = colorDescription;
       }
       // Add negative prompting to exclude unwanted awning types
       let negativePrompting = "";
-      if (awningType === "knikarm" || awningType === "knikarmscherm") {
-        negativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO fixed awnings without retractable arms, 4) NO awnings with curved or wedge-shaped tops, 5) NO awnings with fabric side panels or valances, 6) NO simple canopies without visible folding arm mechanisms. MANDATORY REQUIREMENTS: This MUST be a modern retractable folding arm awning (knikarm) with: horizontal wall-mounted cassette + TWO visible articulated folding arms extending horizontally + flat fabric canopy stretched between arms. REJECT any design that doesn't have these exact features.";
+      let negativePromptingNL = "";
+      
+      // Get type-specific negative prompting first
+      let typeSpecificNegativePrompting = "";
+      let typeSpecificNegativePromptingNL = "";
+      
+      if (effectiveAwningType === "markiezen") {
+        typeSpecificNegativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
+        typeSpecificNegativePromptingNL = "KRITISCHE MARKIES-AFWIJZINGSREGELS: ABSOLUUT VERBODEN – geen knikarmen die horizontaal uit de muur komen, geen cassette of rolkast, geen zwarte metalen voorlijst, geen scharnierpunten of zichtbare mechanische delen, geen retractiemechanismen. VERPLICHT: dit is een traditionele vaste markies met gebogen/wigvormig dak, zijschotten en voorvolant – geen retractabel scherm. Als er knikarmen of een cassette zichtbaar zijn, is het resultaat fout. Voeg ook geen handkruk, slingerarm, ketting, koord, katrollen, hendels of andere bedieningen toe. De markies moet schoon en verzorgd ogen, zonder onnodige hardware.";
+      } else if (awningType === "knikarm" || awningType === "knikarmscherm") {
+        typeSpecificNegativePrompting = "CRITICAL REJECTION RULES: ABSOLUTELY DO NOT create any of these wrong awning types: 1) NO traditional fixed canopy awnings (markiezen) with curved tops, side cheeks, or fabric valances, 2) NO vertical drop arm awnings (uitvalarm) that hang down like window shades, 3) NO fixed awnings without retractable arms, 4) NO awnings with curved or wedge-shaped tops, 5) NO awnings with fabric side panels or valances, 6) NO simple canopies without visible folding arm mechanisms, 7) NO vertical ground-support posts or poles beneath the awning front edge – knikarm awnings are cantilevered and supported only by wall-mounted brackets and horizontal folding arms. MANDATORY REQUIREMENTS: This MUST be a modern retractable folding arm awning (knikarm) with: horizontal wall-mounted cassette + TWO visible articulated folding arms extending horizontally + flat fabric canopy stretched between arms. REJECT any design that doesn't have these exact features.";
       } else if (awningType === "uitvalarm" || awningType === "uitvalscherm") {
-        negativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward horizontally. DO NOT create long support arms that extend down to the ground or near ground level - the support arms must be SHORT (maximum 50-80cm). This must be a VERTICAL DROP ARM awning that hangs DOWN like a window shade, NOT a horizontal canopy that extends OUT. The fabric must drop vertically downward to cover the window, not extend horizontally outward to create overhead shade. The support arms are SHORT STRUTS to hold fabric away from window, NOT long poles extending downward. Reject any horizontal orientation completely and any long extending arms completely.";
-      } else if (awningType === "markiezen") {
-        negativePrompting = "CRITICAL: Do NOT add any retractable arms, front roller, cassette, or black metal front bar. NO knikarm hardware. This must be a traditional fixed canopy with curved/wedge shape, side cheeks, and a fabric valance.";
+        typeSpecificNegativePrompting = "CRITICAL: ABSOLUTELY DO NOT create any horizontal canopy, horizontal awning, or outward-projecting shade structure. DO NOT create a retractable folding arm awning (knikarm) with horizontal extending arms. DO NOT create a traditional fixed canopy (markiezen) that projects outward horizontally. DO NOT create long support arms that extend down to the ground or near ground level - the support arms must be SHORT (maximum 50-80cm). This must be a VERTICAL DROP ARM awning that hangs DOWN like a window shade, NOT a horizontal canopy that extends OUT. The fabric must drop vertically downward to cover the window, not extend horizontally outward to create overhead shade. The support arms are SHORT STRUTS to hold fabric away from window, NOT long poles extending downward. Reject any horizontal orientation completely and any long extending arms completely.";
       }
-      return `Using the provided image, add a ${awningDescription} to this house. Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. ${modelDescription} The awning should look realistic and professionally installed. ${negativePrompting} CRITICAL ASPECT RATIO REQUIREMENT: Do not change the input aspect ratio. You MUST preserve the exact same aspect ratio, width, height, and dimensions as the input image. Do NOT crop, resize, stretch, or change the image proportions in ANY way. The output image must have identical dimensions to the input. ${variation}: ${variationStrategies[variation] || variationStrategies.A}.`;
+      
+      if (hasModelReference) {
+        if (effectiveAwningType === "markiezen") {
+          negativePromptingNL = `STRIKTE TYPECONSISTENTIE: Maak geen ander type dan in de referentie. Voeg geen knikarmen, cassette/rolkast, uitvalhardware of zwarte metalen voorlijst toe, tenzij duidelijk zichtbaar in de referentie. Verander geen gevelelementen en verzin geen mechanische onderdelen. ${typeSpecificNegativePromptingNL}`;
+        } else if (effectiveAwningType === "knikarm" || effectiveAwningType === "knikarmscherm") {
+          negativePrompting = `STRICT TYPE CONSISTENCY: Match the reference model's style, but IGNORE any vertical ground-support posts/poles that may appear in the reference. DO NOT add posts, poles, or vertical supports to the ground. Knikarm awnings are cantilevered: only wall-mounted cassette + two horizontal articulated arms are allowed. Do not add drop-arm hardware or black metal front bars. Do not change building elements or invent mechanical features not in the reference.`;
+        } else {
+          negativePrompting = `STRICT TYPE CONSISTENCY: Do not create any awning type different from the reference image. Do not add folding arms, cassettes, drop-arm hardware, or black metal front bars unless clearly visible in the reference. Do not change building elements or invent mechanical features not in the reference. ${typeSpecificNegativePrompting}`;
+        }
+      } else {
+        // Use the type-specific negative prompting for non-reference scenarios
+        if (effectiveAwningType === "markiezen") {
+          negativePromptingNL = typeSpecificNegativePromptingNL;
+        } else {
+          negativePrompting = typeSpecificNegativePrompting;
+        }
+      }
+      // Global hardware exclusions: never render a manual crank/slingerarm
+      const hardwareExclusionsNL = " EXTRA HARDWARE-UITSLUITINGEN: absoluut geen slingerarm/handkruk, draaistang, hangende stang of ketting, zichtbare muurkruk of andere externe bediening. Geen verticale staanders of palen tot aan de grond. Bediening is verborgen; geen externe kruk of stang zichtbaar.";
+      const hardwareExclusionsEN = " ADDITIONAL HARDWARE EXCLUSIONS: ABSOLUTELY DO NOT include any manual crank handle (slingerarm), winding handle, hanging rod or chain, visible wall-mounted hand crank, or any dangling operating device. Also DO NOT include any vertical ground-support posts or poles. Operation controls must be hidden; no external crank or rod should be visible.";
+      if (effectiveAwningType === "markiezen") {
+        negativePromptingNL += hardwareExclusionsNL;
+      } else {
+        negativePrompting += hardwareExclusionsEN;
+      }
+      const intro = hasModelReference
+        ? "CRITICAL IMAGE ORDER: The FIRST image shows the house/building where the awning must be placed. The SECOND image is a REFERENCE EXAMPLE showing the awning style. Modify ONLY the first house image by adding an awning matching the second image's style. DO NOT generate a new building - use the exact building from image 1."
+        : `Using the provided image, add a ${awningDescription} to this house.`;
+      const introNL = hasModelReference
+        ? "KRITISCHE BEELDVOLGORDE: De EERSTE afbeelding toont het huis/gebouw waar de markies geplaatst moet worden. De TWEEDE afbeelding is een REFERENTIEVOORBEELD van de markiesstijl. Wijzig ALLEEN de eerste huisafbeelding door een markies toe te voegen die overeenkomt met de stijl van de tweede afbeelding. Genereer GEEN nieuw gebouw - gebruik het exacte gebouw uit afbeelding 1."
+        : "Gebruik de aangeleverde afbeelding en voeg een MARKIES toe volgens de beschrijving.";
+      if (effectiveAwningType === "markiezen") {
+        return `${introNL} Volg de rode lijn exact voor de positie en verwijder deze daarna volledig. Laat verder alles in de afbeelding ongewijzigd; behoud de originele stijl, belichting en compositie. ${modelDescriptionNL} De markies moet realistisch en professioneel gemonteerd zijn. ${negativePromptingNL} KRITISCHE BEELDVERHOUDINGSEIS: wijzig de inputverhouding niet. Behoud exact dezelfde aspect-ratio, breedte, hoogte en afmetingen als de invoerafbeelding. Niet croppen, niet resizen, niet rekken en geen proporties wijzigen. De uitvoerafbeelding moet identieke dimensies hebben als de invoer. Variatie: ${variationStrategies[variation] || variationStrategies.A}.`;
+      }
+      return `${intro} Follow the red line exactly for placement, then remove the red line completely. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition. ${modelDescription} The awning should look realistic and professionally installed. ${negativePrompting} CRITICAL ASPECT RATIO REQUIREMENT: Do not change the input aspect ratio. You MUST preserve the exact same aspect ratio, width, height, and dimensions as the input image. Do NOT crop, resize, stretch, or change the image proportions in ANY way. The output image must have identical dimensions to the input. ${variation}: ${variationStrategies[variation] || variationStrategies.A}.`;
     }
     // Function to build evaluation prompt with type-specific criteria
-    function buildEvaluationPrompt(awningType) {
+    function buildEvaluationPrompt(awningType, hasModelReference = false) {
+      if (awningType === 'canopy') {
+        return `Evaluate this house image with CANOPY awning placement.${hasModelReference ? " You will ALSO receive a reference image of the model." : ""}
+
+Respond ONLY with JSON:\n{\n  "placement_quality": number,\n  "visual_realism": number,\n  "red_line_removed": boolean,\n  "technical_quality": number,\n  "overall_score": number,\n  "is_correct_awning_type": boolean,\n  "awning_type_detected": "string",\n  "is_canopy_shape": boolean,\n  "has_sleek_minimal_frame": boolean,\n  "has_knikarm_arms": boolean,\n  "has_front_roller_or_cassette": boolean,\n  "matches_reference_model": ${hasModelReference ? 'boolean' : 'false'},\n  "has_vertical_wall_arms": boolean,\n  "wall_arms_count": number,\n  "issues": "description"\n}`;
+      }
       if (awningType === "markiezen") {
+        if (hasModelReference) {
+          return `Beoordeel deze afbeelding met MARKIES plaatsing. Je krijgt OOK een referentieafbeelding van het model. Vergelijk het resultaat met de referentie en antwoord ALLEEN met JSON:\n{\n  "placement_quality": number,\n  "visual_realism": number,\n  "red_line_removed": boolean,\n  "technical_quality": number,\n  "overall_score": number,\n  "matches_reference_model": boolean,\n  "has_knikarm_arms": boolean,\n  "has_front_roller_or_cassette": boolean,\n  "has_black_metal_front_bar": boolean,\n  "is_fixed_canopy_shape": boolean,\n  "has_side_cheeks": boolean,\n  "has_fabric_valance": boolean,\n  "issues": "description"\n}`;
+        }
         return `Evaluate this house image with markiezen awning placement. Respond ONLY with JSON:\n{\n  "placement_quality": number,\n  "visual_realism": number,\n  "red_line_removed": boolean,\n  "technical_quality": number,\n  "overall_score": number,\n  "has_knikarm_arms": boolean,\n  "has_front_roller_or_cassette": boolean,\n  "has_black_metal_front_bar": boolean,\n  "is_fixed_canopy_shape": boolean,\n  "has_side_cheeks": boolean,\n  "has_fabric_valance": boolean,\n  "issues": "description"\n}`;
+      }
+      if (hasModelReference) {
+        return `Evaluate this house image with ${awningType} awning placement. You ALSO receive a reference image of the model. Compare the result to the reference. Rate 1-10 for: placement quality, visual realism, red line removal, technical quality. Return JSON: {"placement_quality": number, "visual_realism": number, "red_line_removed": boolean, "technical_quality": number, "overall_score": number, "matches_reference_model": boolean, "issues": "description"}`;
       }
       return `Evaluate this house image with ${awningType} awning placement. Rate 1-10 for: placement quality, visual realism, red line removal, technical quality. Return JSON: {"placement_quality": number, "visual_realism": number, "red_line_removed": boolean, "technical_quality": number, "overall_score": number, "issues": "description"}`;
     }
@@ -364,6 +482,10 @@ Deno.serve(async (req)=>{
         if (evaluation.is_fixed_canopy_shape === true) score += 20;
         if (evaluation.has_side_cheeks === true) score += 10;
         if (evaluation.has_fabric_valance === true) score += 10;
+        if (typeof evaluation.matches_reference_model === 'boolean') {
+          // Reward strong adherence to reference if provided in prompt
+          if (evaluation.matches_reference_model === true) score += 20; else score -= 20;
+        }
       }
       // Prevent negative scores
       score = Math.max(0, score);
@@ -460,22 +582,31 @@ Deno.serve(async (req)=>{
       };
     }
     // Function to generate placement version
-    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey) {
+    async function generatePlacementVersion(prompt, imageBase64, label, geminiApiKey, referenceImages = []) {
       const GEMINI_IMAGE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent";
+      const parts: any[] = [
+        {
+          inlineData: {
+            mimeType: "image/png",
+            data: imageBase64
+          }
+        }
+      ];
+      for (const ref of referenceImages) {
+        if (ref && ref.base64Data) {
+          parts.push({
+            inlineData: {
+              mimeType: ref.mimeType || "image/png",
+              data: ref.base64Data
+            }
+          });
+        }
+      }
+      parts.push({ text: prompt });
       const requestBody = {
         contents: [
           {
-            parts: [
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: imageBase64
-                }
-              },
-              {
-                text: prompt
-              }
-            ]
+            parts
           }
         ],
         generationConfig: {
@@ -525,23 +656,18 @@ Deno.serve(async (req)=>{
       };
     }
     // Function to evaluate placement
-    async function evaluatePlacement(evaluationPrompt, imageBase64, geminiApiKey) {
+    async function evaluatePlacement(evaluationPrompt, imageBase64, geminiApiKey, referenceInlineData = null) {
       const GEMINI_TEXT_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+      const parts: any[] = [
+        { text: evaluationPrompt },
+        { inlineData: { mimeType: "image/png", data: imageBase64 } }
+      ];
+      if (referenceInlineData && referenceInlineData.data) {
+        parts.push({ inlineData: { mimeType: referenceInlineData.mimeType || "image/png", data: referenceInlineData.data } });
+      }
       const requestBody = {
         contents: [
-          {
-            parts: [
-              {
-                text: evaluationPrompt
-              },
-              {
-                inlineData: {
-                  mimeType: "image/png",
-                  data: imageBase64
-                }
-              }
-            ]
-          }
+          { parts }
         ],
         generationConfig: {
           temperature: 0.1,
@@ -586,8 +712,16 @@ Deno.serve(async (req)=>{
     // Parse the input image
     const parsed = parseDataUri(image);
     const imageBase64 = parsed.base64Data;
+    // Parse optional awning model reference image; add canopy default if absent
+    let modelRefInput = typeof new_awning_reference_image === 'string' ? new_awning_reference_image : '';
+    if ((awning_type && awning_type.toLowerCase().includes('canopy')) && (!modelRefInput || !modelRefInput.trim())) {
+      modelRefInput = '/Users/konniet/Downloads/canopy_selectmodel.jpeg';
+      console.log('[DEBUG] Using default canopy model reference image');
+    }
+    const hasModelReference = !!(modelRefInput && modelRefInput.trim());
+    const modelReferenceParsed = hasModelReference ? await parseAnyImageToDataUri(modelRefInput) : null;
     // Generate placement variations with early stopping and iterative improvement
-    const evaluationPrompt = buildEvaluationPrompt(awning_type);
+    const evaluationPrompt = buildEvaluationPrompt(awning_type, hasModelReference);
     console.log(`[DEBUG] Starting placement generation phase...`);
     const variations = [];
     const maxVariations = 5;
@@ -601,7 +735,13 @@ Deno.serve(async (req)=>{
     for(let i = 0; i < initialVariations; i++){
       try {
         console.log(`[DEBUG] Generating placement variation ${i + 1}/${initialVariations}...`);
-        const variation = await generatePlacementVersion(buildPlacementPrompt(awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio), currentBaseImage, `Placement ${i + 1}`, GEMINI_API_KEY);
+        const variation = await generatePlacementVersion(
+          buildPlacementPrompt(awning_type, new_awning_model, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio, hasModelReference),
+          imageBase64,
+          `Placement ${i + 1}`,
+          GEMINI_API_KEY,
+          hasModelReference && modelReferenceParsed ? [modelReferenceParsed] : []
+        );
         if (variation.base64Data) {
           // Validate image dimensions
           const validation = await validateImageDimensions(imageBase64, variation.base64Data, `placement variation ${i + 1}`);
@@ -612,7 +752,12 @@ Deno.serve(async (req)=>{
           // Evaluate the placement
           const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
           const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
-          const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
+          const evaluation = await evaluatePlacement(
+            evaluationPrompt,
+            evalBase64Data,
+            GEMINI_API_KEY,
+            hasModelReference && modelReferenceParsed ? { mimeType: modelReferenceParsed.mimeType, data: modelReferenceParsed.base64Data } : null
+          );
           const score = computePlacementScore(evaluation, awning_type);
           variations.push({
             label: variation.label,
@@ -666,9 +811,15 @@ Deno.serve(async (req)=>{
         try {
           console.log(`[DEBUG] Generating placement variation ${i + 1}/${maxVariations} (iterative improvement)...`);
           // Use improved prompt for iterative refinement
-          const basePrompt = buildPlacementPrompt(awning_type, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio);
+          const basePrompt = buildPlacementPrompt(awning_type, new_awning_model, String.fromCharCode(65 + i), new_fabric_color, pattern_type, stripe_ratio, hasModelReference);
           const iterativePrompt = `${basePrompt}\n\nIMPORTANT: This is an iterative improvement. The current image already has an awning, but it needs refinement. Focus on:\n- Improving the awning's positioning and proportions\n- Enhancing the structural realism and mounting details\n- Better integration with the building architecture\n- Correcting any placement or scaling issues from the previous iteration`;
-          const variation = await generatePlacementVersion(iterativePrompt, currentBaseImage, `Placement ${i + 1} (Refined)`, GEMINI_API_KEY);
+          const variation = await generatePlacementVersion(
+            iterativePrompt,
+            imageBase64,
+            `Placement ${i + 1} (Refined)`,
+            GEMINI_API_KEY,
+            hasModelReference && modelReferenceParsed ? [modelReferenceParsed] : []
+          );
           if (variation.base64Data) {
             // Validate image dimensions
             const validation = await validateImageDimensions(imageBase64, variation.base64Data, `refined placement variation ${i + 1}`);
@@ -679,7 +830,12 @@ Deno.serve(async (req)=>{
             // Evaluate the placement
             const evalBase64Match = variation.base64Data.match(/^data:image\/[a-zA-Z0-9+.-]+;base64,(.+)$/i);
             const evalBase64Data = evalBase64Match ? evalBase64Match[1] : variation.base64Data;
-            const evaluation = await evaluatePlacement(evaluationPrompt, evalBase64Data, GEMINI_API_KEY);
+            const evaluation = await evaluatePlacement(
+              evaluationPrompt,
+              evalBase64Data,
+              GEMINI_API_KEY,
+              hasModelReference && modelReferenceParsed ? { mimeType: modelReferenceParsed.mimeType, data: modelReferenceParsed.base64Data } : null
+            );
             const score = computePlacementScore(evaluation, awning_type);
             variations.push({
               label: variation.label,
@@ -767,10 +923,50 @@ Deno.serve(async (req)=>{
           if (currentColorIteration === 1) {
             // First iteration: comprehensive color application
             if (finalPatternType === 'solid') {
-              colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.`;
+              colorEditPrompt = hasColorSwatch ? `Color correction to match swatch: Apply the exact color from the reference swatch to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. ${swatchReference}
+
+Respond with JSON feedback:
+{
+  "color_application_status": "success|partial|failed",
+  "color_accuracy": 0.95,
+  "pattern_consistency": true,
+  "fabric_visibility": "clear|moderate|poor",
+  "notes": "description of application quality",
+  "adjustments_made": ["list of specific changes"]
+}` : `Color application: Apply ${new_fabric_color} to the awning fabric only. Preserve all structural elements (frame, arms, cassette) and building features. Create uniform, smooth fabric appearance.
+
+Respond with JSON feedback:
+{
+  "color_application_status": "success|partial|failed",
+  "color_accuracy": 0.95,
+  "pattern_consistency": true,
+  "fabric_visibility": "clear|moderate|poor",
+  "notes": "description of application quality",
+  "adjustments_made": ["list of specific changes"]
+}`;
             } else {
-              colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. Create consistent pattern across entire fabric surface, maintaining stripe proportions.`;
-            }
+                colorEditPrompt = hasColorSwatch ? `Pattern application to match swatch: Apply the exact pattern from the reference swatch to the awning fabric only. Ensure pattern consistency across all fabric panels. ${swatchReference}
+
+Respond with JSON feedback:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": 0.95,
+  "stripe_consistency": true,
+  "color_alternation": "proper|uneven|missing",
+  "notes": "description of pattern quality",
+  "stripe_issues": ["list of specific pattern problems"]
+}` : `Stripe application: Apply ${new_fabric_color} stripes with ${finalStripeRatio} ratio to the awning fabric only. Create consistent pattern across entire fabric surface, maintaining stripe proportions.
+
+Respond with JSON feedback:
+{
+  "pattern_application_status": "success|partial|failed",
+  "pattern_accuracy": 0.95,
+  "stripe_consistency": true,
+  "color_alternation": "proper|uneven|missing",
+  ${finalStripeRatio === '1:1' ? '"notes": "description of pattern quality",' : '"stripe_ratio_accuracy": 0.9,\n  "ratio_issues": ["list of ratio problems"],'}
+  "stripe_issues": ["list of specific pattern problems"]
+}`;
+              }
           } else {
             // Second iteration: refinement and correction
             const refinementPrompts = finalPatternType === 'solid' ? hasColorSwatch ? [
@@ -850,19 +1046,31 @@ Deno.serve(async (req)=>{
             throw new Error(`Color edit API error: ${colorEditResponse.status}`);
           }
           const colorEditResult = await colorEditResponse.json();
-          // Extract edited image
+          // Extract edited image and application feedback
           let editedColorImageData = null;
+          let colorApplicationFeedback = null;
           if (colorEditResult.candidates && colorEditResult.candidates[0]) {
             const candidate = colorEditResult.candidates[0];
             if (candidate.content && candidate.content.parts) {
               for (const part of candidate.content.parts){
+                // Extract image data
                 const imageData = part.inlineData || part.inline_data;
                 if (imageData && imageData.data) {
                   let mimeType = imageData.mimeType || imageData.mime_type || 'image/png';
                   if (mimeType === 'image/jpg') mimeType = 'image/jpeg';
                   if (!mimeType.startsWith('image/')) mimeType = 'image/png';
                   editedColorImageData = `data:${mimeType};base64,${imageData.data}`;
-                  break;
+                }
+                // Extract JSON feedback from text parts
+                if (part.text && !colorApplicationFeedback) {
+                  try {
+                    const jsonMatch = part.text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                      colorApplicationFeedback = JSON.parse(jsonMatch[0]);
+                    }
+                  } catch (e) {
+                    console.log(`Failed to parse color application feedback JSON:`, e.message);
+                  }
                 }
               }
             }
@@ -1015,7 +1223,8 @@ Deno.serve(async (req)=>{
             issues: colorIssues,
             image_data: editedColorImageData,
             prompt_used: colorEditPrompt,
-            goal_met: colorEvaluation.goal_met || colorScore >= colorGoalThreshold
+            goal_met: colorEvaluation.goal_met || colorScore >= colorGoalThreshold,
+            applicationFeedback: colorApplicationFeedback
           };
           colorIterations.push(colorIterationData);
           // Update best if this is better
